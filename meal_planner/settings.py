@@ -53,6 +53,9 @@ LOGIN_URL = "/accounts/google/login/"
 SOCIALACCOUNT_LOGIN_ON_GET = True
 SOCIALACCOUNT_ONLY = True
 ACCOUNT_EMAIL_VERIFICATION = "none"
+# The proxy also answers on plain http, and Google only accepts the https callback, so never
+# build an http one. (Not SECURE_SSL_REDIRECT: Airflow calls /internal/ over http inside Docker.)
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = "http" if DEBUG else "https"
 ACCOUNT_ADAPTER = 'meals.adapter.CustomAccountAdapter'
 SOCIALACCOUNT_ADAPTER = 'meals.adapter.CustomSocialAccountAdapter'
 
