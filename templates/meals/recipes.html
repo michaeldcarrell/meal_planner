@@ -1,0 +1,21 @@
+{% extends "_layout.html" %}
+{% block title %}Recipes{% endblock %}
+{% block body %}
+<h1 class="h3">Recipes</h1>
+<table class="table table-sm align-middle">
+    <thead><tr><th>Recipe</th><th>Cuisine</th><th>Min</th><th>Score</th><th>Served</th></tr></thead>
+    <tbody>
+    {% for r in recipes %}
+    <tr class="{% if r.archived %}text-body-secondary{% endif %}">
+        <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.name }}</a>{% if r.archived %} <span class="badge text-bg-secondary">archived</span>{% endif %}</td>
+        <td>{{ r.cuisine }}</td>
+        <td>{{ r.total_minutes|default:"" }}</td>
+        <td>{% if r.total > 0 %}+{% endif %}{{ r.total|default:0 }}</td>
+        <td>{{ r.times }}×</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5">No recipes yet — they're saved as plans are generated.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

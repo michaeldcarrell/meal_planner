@@ -1,0 +1,20 @@
+services:
+  meal_planner:
+    build: .
+    container_name: meal_planner
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8006:8000"
+    volumes:
+      # Google service account key for Calendar (not committed; see README).
+      - ./secrets:/app/secrets:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

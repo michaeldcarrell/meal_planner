@@ -1,0 +1,25 @@
+{% extends "_layout.html" %}
+{% block title %}{{ recipe.name }}{% endblock %}
+{% block body %}
+<a href="{% url 'plan' meal.plan.week_start|date:'Y-m-d' %}#meal-{{ meal.pk }}" class="small">‹ Week of {{ meal.plan.week_start|date:"M j" }}</a>
+<div class="text-body-secondary mt-2">{{ meal.date|date:"l, M j" }}{% if meal.locked %} · 🔒 locked{% endif %}</div>
+{% include "meals/_recipe_body.html" %}
+
+<div class="card card-body mt-4">
+    <h2 class="h6">Not feeling it?</h2>
+    <form method="post" action="{% url 'replace_meal' meal.pk %}" class="slow input-group mb-2">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <input name="hint" class="form-control" placeholder="What would you rather have? (optional)">
+        <button type="submit" class="btn btn-warning">Suggest something else</button>
+    </form>
+    {% if favorites %}
+    <form method="post" action="{% url 'replace_meal' meal.pk %}" class="input-group">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <select name="recipe_id" class="form-select">
+            {% for r in favorites %}<option value="{{ r.pk }}">{{ r.name }} (+{{ r.total }})</option>{% endfor %}
+        </select>
+        <button class="btn btn-outline-warning">Use a favorite</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

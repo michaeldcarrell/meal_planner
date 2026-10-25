@@ -1,0 +1,6 @@
+<form method="post" action="{% url 'rate_recipe' recipe.pk %}" class="d-inline">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <button name="value" value="{% if my_rating == 1 %}0{% else %}1{% endif %}" class="btn btn-sm {% if my_rating == 1 %}btn-success{% else %}btn-outline-success{% endif %}" title="Liked it">👍</button>
+    <button name="value" value="{% if my_rating == -1 %}0{% else %}-1{% endif %}" class="btn btn-sm {% if my_rating == -1 %}btn-danger{% else %}btn-outline-danger{% endif %}" title="Didn't like it">👎</button>
+</form>

@@ -1,0 +1,13 @@
+{% extends "_layout.html" %}
+{% block title %}{{ recipe.name }}{% endblock %}
+{% block body %}
+<a href="{% url 'recipes' %}" class="small">‹ All recipes</a>
+{% if recipe.archived %}<div class="alert alert-secondary mt-2 py-2">Archived — the planner won't suggest this.</div>{% endif %}
+{% include "meals/_recipe_body.html" %}
+{% if history %}
+<p class="small text-body-secondary">Served: {% for m in history %}<a href="{% url 'meal_detail' m.pk %}">{{ m.date|date:"M j, Y" }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+{% endif %}
+<form method="post" action="{% url 'toggle_archive' recipe.pk %}">{% csrf_token %}
+    <button class="btn btn-sm btn-outline-secondary">{% if recipe.archived %}Allow suggesting again{% else %}Never suggest this again{% endif %}</button>
+</form>
+{% endblock %}

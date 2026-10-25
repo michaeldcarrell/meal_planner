@@ -1,0 +1,24 @@
+<div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 600px; color: #222;">
+  <h2 style="margin-bottom: 4px;">🍽 Dinners for the week of {{ plan.week_start|date:"M j" }}</h2>
+  <p style="margin-top: 0; color: #666;">Tap a meal to see the recipe, rate it, or swap it for something else.</p>
+  {% for m in meals %}
+  <div style="border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;">
+    <div style="color: #888; font-size: 13px;">{{ m.meal.date|date:"l, M j" }} · {{ m.meal.recipe.total_minutes|default:"?" }} min · {{ m.meal.recipe.cuisine }}</div>
+    <div style="font-size: 17px; font-weight: 600; margin: 2px 0 4px;"><a href="{{ m.url }}" style="color: #0b5ed7; text-decoration: none;">{{ m.meal.recipe.name }}</a></div>
+    <div style="font-size: 14px;">{{ m.meal.recipe.summary }}</div>
+    <div style="margin-top: 8px; font-size: 14px;"><a href="{{ m.url }}" style="color: #0b5ed7;">👍 / 👎 / Replace</a></div>
+  </div>
+  {% endfor %}
+  <p>
+    <a href="{{ plan_url }}" style="display: inline-block; background: #0b5ed7; color: #fff; padding: 8px 14px; border-radius: 6px; text-decoration: none;">Open the plan</a>
+    &nbsp;
+    <a href="{{ groceries_url }}" style="display: inline-block; border: 1px solid #0b5ed7; color: #0b5ed7; padding: 7px 14px; border-radius: 6px; text-decoration: none;">🛒 Groceries &amp; cart</a>
+  </p>
+  {% if last_week %}
+  <h3 style="margin-top: 24px;">How was last week?</h3>
+  <p style="color: #666; margin-top: 0;">Ratings teach the planner what to bring back.</p>
+  <ul>
+    {% for m in last_week %}<li><a href="{{ m.url }}">{{ m.meal.recipe.name }}</a></li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>

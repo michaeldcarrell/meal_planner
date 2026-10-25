@@ -1,0 +1,8 @@
+.env*
+stack.env
+secrets/
+.git/
+.venv/
+__pycache__/
+db.sqlite3
+staticfiles/

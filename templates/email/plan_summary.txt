@@ -1,0 +1,12 @@
+Dinners for the week of {{ plan.week_start|date:"M j" }}
+{% for m in meals %}
+{{ m.meal.date|date:"l" }}: {{ m.meal.recipe.name }} ({{ m.meal.recipe.total_minutes|default:"?" }} min)
+  {{ m.meal.recipe.summary }}
+  Rate or replace: {{ m.url }}
+{% endfor %}
+Full plan: {{ plan_url }}
+Grocery list / King Soopers cart: {{ groceries_url }}
+{% if last_week %}
+How was last week? Rate these so the planner learns:
+{% for m in last_week %}- {{ m.meal.recipe.name }}: {{ m.url }}
+{% endfor %}{% endif %}

@@ -1,0 +1,29 @@
+<h1 class="h3 mt-1">{{ recipe.name }}</h1>
+<p>{{ recipe.summary }}</p>
+<p class="text-body-secondary small">⏱ {{ recipe.total_minutes|default:"?" }} min · serves {{ recipe.servings|default:"?" }} · {{ recipe.cuisine }}</p>
+
+<div class="d-flex align-items-center gap-2 mb-2">
+    <form method="post" action="{% url 'rate_recipe' recipe.pk %}" class="d-flex gap-2 flex-wrap">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <input name="comment" class="form-control form-control-sm" style="max-width: 22rem" placeholder="Comment (optional)" value="{{ my_rating.comment }}">
+        <button name="value" value="1" class="btn btn-sm {% if my_rating.value == 1 %}btn-success{% else %}btn-outline-success{% endif %}">👍 Liked it</button>
+        <button name="value" value="-1" class="btn btn-sm {% if my_rating.value == -1 %}btn-danger{% else %}btn-outline-danger{% endif %}">👎 Didn't</button>
+        {% if my_rating %}<button name="value" value="0" class="btn btn-sm btn-link">clear</button>{% endif %}
+    </form>
+</div>
+{% if votes %}
+<ul class="small list-unstyled">
+    {% for v in votes %}<li>{% if v.value == 1 %}👍{% else %}👎{% endif %} <strong>{{ v.user.first_name|default:v.user.username }}</strong>{% if v.comment %}: {{ v.comment }}{% endif %}</li>{% endfor %}
+</ul>
+{% endif %}
+
+<div class="row mt-3">
+    <div class="col-md-5">
+        <h2 class="h5">Ingredients</h2>
+        <ul>{% for i in recipe.ingredients %}<li>{{ i.quantity }} {{ i.name }}</li>{% endfor %}</ul>
+    </div>
+    <div class="col-md-7">
+        <h2 class="h5">Instructions</h2>
+        <div class="recipe-steps">{{ recipe.instructions|linebreaks }}</div>
+    </div>
+</div>

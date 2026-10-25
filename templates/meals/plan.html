@@ -1,0 +1,67 @@
+{% extends "_layout.html" %}
+{% block title %}Week of {{ week_start|date:"M j" }}{% endblock %}
+{% block body %}
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'plan' prev_week %}">‹</a>
+    <h1 class="h3 m-0">Week of {{ week_start|date:"M j, Y" }}</h1>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'plan' next_week %}">›</a>
+    {% if plan %}
+    <div class="ms-auto d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-primary" href="{% url 'groceries' week_start|date:'Y-m-d' %}">🛒 Groceries</a>
+        <form method="post" action="{% url 'email_plan' week_start|date:'Y-m-d' %}">{% csrf_token %}
+            <button class="btn btn-sm btn-outline-primary">✉️ Email summary</button></form>
+        <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow"
+              onsubmit="return confirm('Re-pick every unlocked dinner this week?')">{% csrf_token %}
+            <input type="hidden" name="regenerate" value="1">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">🔄 Regenerate unlocked</button></form>
+    </div>
+    {% endif %}
+</div>
+
+{% if not plan or not meals %}
+<div class="card card-body">
+    <p class="mb-2">No dinners planned for this week yet.</p>
+    <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow">{% csrf_token %}
+        <button type="submit" class="btn btn-primary">Plan this week</button></form>
+</div>
+{% endif %}
+
+<div class="row g-3">
+{% for meal in meals %}
+    <div class="col-12 col-md-6 col-xl-4" id="meal-{{ meal.pk }}">
+        <div class="card h-100 {% if meal.locked %}border-primary{% endif %}">
+            <div class="card-body d-flex flex-column">
+                <div class="text-body-secondary small">{{ meal.date|date:"l, M j" }}{% if meal.locked %} · 🔒 locked{% endif %}</div>
+                <h2 class="h5 mt-1"><a href="{% url 'meal_detail' meal.pk %}">{{ meal.recipe.name }}</a></h2>
+                <p class="small mb-1">{{ meal.recipe.summary }}</p>
+                <p class="small text-body-secondary mb-2">⏱ {{ meal.recipe.total_minutes|default:"?" }} min · {{ meal.recipe.cuisine }}{% if meal.why %} · <em>{{ meal.why }}</em>{% endif %}</p>
+                {% if meal.votes %}<p class="small mb-2">{% for v in meal.votes %}{% if v.value == 1 %}👍{% else %}👎{% endif %} {{ v.user.first_name|default:v.user.username }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+                <div class="mt-auto d-flex gap-2 flex-wrap align-items-start">
+                    {% include "meals/_rate_buttons.html" with recipe=meal.recipe my_rating=meal.my_rating %}
+                    <form method="post" action="{% url 'toggle_lock' meal.pk %}">{% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button class="btn btn-sm btn-outline-secondary">{% if meal.locked %}Unlock{% else %}🔒 Lock{% endif %}</button></form>
+                    <button class="btn btn-sm btn-outline-warning" data-bs-toggle="collapse" data-bs-target="#replace-{{ meal.pk }}">Replace…</button>
+                </div>
+                <div class="collapse mt-2" id="replace-{{ meal.pk }}">
+                    <form method="post" action="{% url 'replace_meal' meal.pk %}" class="slow input-group input-group-sm mb-2">{% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <input name="hint" class="form-control" placeholder="e.g. something quicker, no pasta">
+                        <button type="submit" class="btn btn-warning">Suggest</button>
+                    </form>
+                    {% if favorites %}
+                    <form method="post" action="{% url 'replace_meal' meal.pk %}" class="input-group input-group-sm">{% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="recipe_id" class="form-select">
+                            {% for r in favorites %}<option value="{{ r.pk }}">{{ r.name }} (+{{ r.total }})</option>{% endfor %}
+                        </select>
+                        <button class="btn btn-outline-warning">Use favorite</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endfor %}
+</div>
+{% endblock %}
