@@ -38,7 +38,25 @@
         <ul class="ingredient-list">{% for i in recipe.ingredients %}<li><span class="qty">{{ i.quantity }}</span><span>{{ i.name }}</span></li>{% endfor %}</ul>
     </section>
     <section class="section">
-        <div class="section-header"><h2>Instructions</h2></div>
-        <div class="recipe-steps">{{ recipe.instructions|linebreaks }}</div>
+        {% with steps=recipe.steps %}
+        <div class="section-header">
+            <h2>Instructions</h2>
+            {% if steps %}<span class="list-row-meta num"><span data-steps-done>0</span> of {{ steps|length }} done</span>{% endif %}
+        </div>
+        <ol class="step-list" data-steps="recipe-{{ recipe.pk }}">
+            {% for step in steps %}
+            <li>
+                <label class="step-card">
+                    <input type="checkbox" data-step="{{ forloop.counter0 }}">
+                    <span class="step-num" aria-hidden="true">{{ forloop.counter }}</span>
+                    <span class="step-text"><span class="visually-hidden">Step {{ forloop.counter }}: </span>{{ step }}</span>
+                </label>
+            </li>
+            {% empty %}
+            <li class="list-row-meta">No instructions for this recipe.</li>
+            {% endfor %}
+        </ol>
+        {% if steps %}<button type="button" class="btn btn-quiet mt-2 hidden" data-steps-reset>Uncheck all steps</button>{% endif %}
+        {% endwith %}
     </section>
 </div>

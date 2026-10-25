@@ -82,3 +82,34 @@ if (mealSchedule) {
         update();
     }));
 }
+
+// Recipe steps: check them off while cooking. Progress is kept in this browser for 12 hours, so a
+// refresh mid-recipe keeps your place but next time you cook it starts fresh.
+document.querySelectorAll('[data-steps]').forEach(list => {
+    const key = `steps:${list.dataset.steps}`;
+    const boxes = [...list.querySelectorAll('input[data-step]')];
+    const section = list.closest('section');
+    const doneCount = section.querySelector('[data-steps-done]');
+    const reset = section.querySelector('[data-steps-reset]');
+    const save = done => {
+        try { localStorage.setItem(key, JSON.stringify({done, at: Date.now()})); } catch {}
+    };
+    const update = () => {
+        const done = boxes.filter(b => b.checked).map(b => Number(b.dataset.step));
+        if (doneCount) doneCount.textContent = done.length;
+        reset?.classList.toggle('hidden', done.length === 0);
+        return done;
+    };
+    try {
+        const saved = JSON.parse(localStorage.getItem(key) || 'null');
+        if (saved && Date.now() - saved.at < 12 * 60 * 60 * 1000) {
+            boxes.forEach(b => { b.checked = saved.done.includes(Number(b.dataset.step)); });
+        }
+    } catch {}
+    update();
+    boxes.forEach(b => b.addEventListener('change', () => save(update())));
+    reset?.addEventListener('click', () => {
+        boxes.forEach(b => { b.checked = false; });
+        save(update());
+    });
+});

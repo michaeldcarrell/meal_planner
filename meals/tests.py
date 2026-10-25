@@ -263,6 +263,9 @@ class PlanServiceTests(TestCase):
         plan = services.generate_week(SUNDAY)
         meal = plan.meals.first()
         self.client.force_login(self.user)
+        detail = self.client.get(f'/meals/{meal.pk}/')
+        self.assertContains(detail, 'data-steps="recipe-')
+        self.assertContains(detail, '<span class="visually-hidden">Step 1: </span>Cook.', html=False)
         for url in [f'/plan/{SUNDAY}/', f'/meals/{meal.pk}/', '/recipes/', f'/recipes/{meal.recipe_id}/',
                     f'/plan/{SUNDAY}/groceries/', '/plan/2026-11-01/']:
             self.assertEqual(self.client.get(url).status_code, 200, url)
@@ -392,6 +395,23 @@ class PlanServiceTests(TestCase):
         self.assertEqual((household.kroger_location_id, household.kroger_location_name),
                          ('62000123', 'King Soopers - Arapahoe'))
         self.assertEqual(self.client.post('/settings/store/', {'location_id': '../x'}).status_code, 400)
+
+
+class RecipeStepsTests(TestCase):
+    def steps(self, text):
+        return Recipe(instructions=text).steps
+
+    def test_numbered_lines(self):
+        self.assertEqual(self.steps('1. Heat oil.\n\n2) Add onion and cook\n   until soft.\nStep 3: Serve.'),
+                         ['Heat oil.', 'Add onion and cook until soft.', 'Serve.'])
+
+    def test_numbered_steps_on_one_line(self):
+        self.assertEqual(self.steps('1. Bake at 400 for 12. min 2. Rest 5 min. 3. Slice.'),
+                         ['Bake at 400 for 12. min', 'Rest 5 min.', 'Slice.'])
+
+    def test_unnumbered_lines_and_empty(self):
+        self.assertEqual(self.steps('Boil water\nCook pasta 2 minutes'), ['Boil water', 'Cook pasta 2 minutes'])
+        self.assertEqual(self.steps(''), [])
 
 
 class CalendarSyncTests(TestCase):

@@ -808,14 +808,77 @@ a.list-row:hover {
     overflow-wrap: anywhere;
 }
 
-.recipe-steps {
-    padding-top: 12px;
+/* Instructions: one card per step, tapped to check off while cooking. */
+.step-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 12px 0 0;
+    list-style: none;
+}
+
+.step-card {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 12px;
+    border: 1px solid var(--mp-line);
+    border-radius: 8px;
+    background: var(--mp-surface);
+    cursor: pointer;
+}
+
+.step-card input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--mp-line);
+    border-radius: 50%;
+    font-family: var(--mp-font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mp-accent);
+}
+
+.step-text {
+    padding-top: 4px;
     font-size: 15px;
     line-height: 1.6;
 }
 
-.recipe-steps p {
-    margin-bottom: 12px;
+.step-card:has(input:checked) {
+    border-color: var(--mp-line-soft);
+    background: transparent;
+}
+
+.step-card:has(input:checked) .step-num {
+    border-color: var(--mp-accent);
+    background: var(--mp-accent);
+    color: var(--mp-accent-ink);
+    font-size: 0; /* swap the number for a tick */
+}
+
+.step-card:has(input:checked) .step-num::before {
+    content: '✓';
+    font-size: 15px;
+}
+
+.step-card:has(input:checked) .step-text {
+    color: var(--mp-dim);
+}
+
+.step-card:has(input:focus-visible) {
+    outline: 2px solid var(--mp-accent);
+    outline-offset: 2px;
 }
 
 @media (min-width: 992px) {

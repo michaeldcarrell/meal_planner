@@ -1,3 +1,4 @@
+import re
 from datetime import date, timedelta
 
 from django.conf import settings
@@ -148,6 +149,20 @@ class MemberPreferences(models.Model):
         return self.split(self.dislikes)
 
 
+STEP_NUMBER = re.compile(r'^\s*(?:step\s*)?\d+\s*[.):-]\s*', re.IGNORECASE)
+
+
+def _split_inline_steps(line: str) -> list[str]:
+    """'1. Heat. 2. Stir. 3. Serve.' → one string per step. Only splits at the next number in sequence,
+    so an amount like '12. min' inside a step is left alone."""
+    first = re.match(r'\s*(?:step\s*)?(\d+)', line, re.IGNORECASE)
+    parts, number = [], int(first.group(1)) + 1
+    while match := re.search(rf'\s+(?=(?:step\s*)?{number}\s*[.):-]\s)', line, re.IGNORECASE):
+        parts.append(line[:match.start()])
+        line, number = line[match.end():], number + 1
+    return parts + [line]
+
+
 class Recipe(models.Model):
     name = models.CharField(max_length=200)
     summary = models.TextField(blank=True)
@@ -169,6 +184,29 @@ class Recipe(models.Model):
     @property
     def score(self) -> int:
         return self.ratings.aggregate(total=Sum('value'))['total'] or 0
+
+    @property
+    def steps(self) -> list[str]:
+        """The instructions as one string per step, without their numbers.
+
+        Claude writes numbered steps, usually one per line but sometimes all on one line. When the steps
+        are numbered, an unnumbered line continues the step before it; otherwise each line is a step.
+        """
+        lines = []
+        for line in self.instructions.splitlines():
+            line = line.strip()
+            if STEP_NUMBER.match(line):
+                lines += _split_inline_steps(line)
+            elif line:
+                lines.append(line)
+        numbered = any(STEP_NUMBER.match(line) for line in lines)
+        steps = []
+        for line in lines:
+            if numbered and steps and not STEP_NUMBER.match(line):
+                steps[-1] += ' ' + line
+            else:
+                steps.append(STEP_NUMBER.sub('', line))
+        return [step for step in steps if step]
 
     def rating_for(self, user):
         rating = self.ratings.filter(user=user).first()
