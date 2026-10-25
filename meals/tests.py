@@ -7,7 +7,7 @@ from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from meals import planner, services
+from meals import calendar_sync, planner, services
 from meals.models import (
     AllowedUser, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, MealSwap, PlannedMeal, Rating, Recipe,
     week_start_for,
@@ -232,6 +232,51 @@ class PlanServiceTests(TestCase):
         self.assertEqual((household.kroger_location_id, household.kroger_location_name),
                          ('62000123', 'King Soopers - Arapahoe'))
         self.assertEqual(self.client.post('/settings/store/', {'location_id': '../x'}).status_code, 400)
+
+
+class CalendarSyncTests(TestCase):
+    """The app sets an event's time once, at creation; later syncs never move it."""
+
+    def setUp(self):
+        household = HouseholdSettings.load()
+        household.calendar_id = 'dinners@group.calendar.google.com'
+        household.save()
+        recipe = Recipe.objects.create(name='Tacos', ingredients=[{'name': 'onion', 'quantity': '1'}])
+        plan = MealPlan.objects.create(week_start=SUNDAY)
+        self.meal = PlannedMeal.objects.create(plan=plan, date=date(2026, 10, 26), recipe=recipe)
+        self.events = mock.Mock()
+        self.events.insert.return_value.execute.return_value = {'id': 'evt1'}
+        patcher = mock.patch('meals.calendar_sync._service')
+        patcher.start().return_value.events.return_value = self.events
+        self.addCleanup(patcher.stop)
+
+    def test_time_set_on_create_then_only_content_is_patched(self):
+        calendar_sync.sync_meal(self.meal)
+        body = self.events.insert.call_args.kwargs['body']
+        self.assertEqual(body['start']['dateTime'], '2026-10-26T17:30:00')
+        self.assertEqual(body['end']['dateTime'], '2026-10-26T18:30:00')
+        self.meal.refresh_from_db()
+        self.assertEqual(self.meal.calendar_event_id, 'evt1')
+
+        self.meal.recipe = Recipe.objects.create(name='Pho', ingredients=[])
+        self.meal.save()
+        calendar_sync.sync_meal(self.meal)
+        self.events.update.assert_not_called()
+        patch = self.events.patch.call_args.kwargs
+        self.assertEqual(patch['eventId'], 'evt1')
+        self.assertEqual(patch['body']['summary'], '🍽 Pho')
+        self.assertFalse({'start', 'end'} & patch['body'].keys())
+        self.assertEqual(self.events.insert.call_count, 1)
+
+    def test_event_deleted_in_google_is_recreated(self):
+        from googleapiclient.errors import HttpError
+        self.meal.calendar_event_id = 'gone'
+        self.meal.save()
+        self.events.patch.return_value.execute.side_effect = HttpError(mock.Mock(status=404), b'')
+        calendar_sync.sync_meal(self.meal)
+        self.assertEqual(self.events.insert.call_args.kwargs['body']['start']['dateTime'], '2026-10-26T17:30:00')
+        self.meal.refresh_from_db()
+        self.assertEqual(self.meal.calendar_event_id, 'evt1')
 
 
 class PlannerRequestTests(TestCase):

@@ -44,10 +44,9 @@ def _service():
     return build('calendar', 'v3', credentials=credentials, cache_discovery=False)
 
 
-def _event_body(meal: PlannedMeal, household: HouseholdSettings) -> dict:
+def _event_content(meal: PlannedMeal) -> dict:
+    """What the app owns on an event: the title, description and link back. Never the time."""
     recipe = meal.recipe
-    start = datetime.combine(meal.date, household.dinner_time)
-    end = start + timedelta(minutes=household.dinner_minutes)
     ingredients = '\n'.join(f"• {i['quantity']} {i['name']}" for i in recipe.ingredients)
     link = settings.APP_BASE_URL + reverse('meal_detail', args=[meal.pk])
     description = (
@@ -60,27 +59,36 @@ def _event_body(meal: PlannedMeal, household: HouseholdSettings) -> dict:
     return {
         'summary': f'🍽 {recipe.name}',
         'description': description,
-        'start': {'dateTime': start.isoformat(), 'timeZone': settings.TIME_ZONE},
-        'end': {'dateTime': end.isoformat(), 'timeZone': settings.TIME_ZONE},
         'source': {'title': 'Meal Planner', 'url': link},
     }
 
 
 def sync_meal(meal: PlannedMeal):
-    """Create or update the meal's calendar event. No-op when no calendar is configured."""
+    """Create or update the meal's calendar event. No-op when no calendar is configured.
+
+    The time is set only when the event is created. Later syncs patch just the content, so a
+    dinner moved (or given guests, reminders, a colour) in Google Calendar stays that way.
+    """
     household = HouseholdSettings.load()
     if not household.calendar_id:
         return
     events = _service().events()
-    body = _event_body(meal, household)
+    content = _event_content(meal)
     if meal.calendar_event_id:
         try:
-            events.update(calendarId=household.calendar_id, eventId=meal.calendar_event_id, body=body).execute()
+            events.patch(calendarId=household.calendar_id, eventId=meal.calendar_event_id, body=content).execute()
             return
         except HttpError as e:
             if e.resp.status not in (404, 410):
                 raise
             logger.info('Calendar event %s gone; recreating', meal.calendar_event_id)
+    start = datetime.combine(meal.date, household.dinner_time)
+    end = start + timedelta(minutes=household.dinner_minutes)
+    body = {
+        **content,
+        'start': {'dateTime': start.isoformat(), 'timeZone': settings.TIME_ZONE},
+        'end': {'dateTime': end.isoformat(), 'timeZone': settings.TIME_ZONE},
+    }
     created = events.insert(calendarId=household.calendar_id, body=body).execute()
     meal.calendar_event_id = created['id']
     meal.save(update_fields=['calendar_event_id'])
