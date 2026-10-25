@@ -24,9 +24,5 @@
             <button class="btn btn-outline-secondary">Use this favorite</button>
         </form>
         {% endif %}
-        <form method="post" action="{% url 'remove_meal' meal.pk %}" class="d-grid mt-4"
-              data-confirm="Remove {{ meal.recipe.name }} from {{ meal.date|date:'l' }}? It won't be re-planned this week.">{% csrf_token %}
-            <button class="btn btn-outline-danger">Remove from this week</button>
-        </form>
     </div>
 </div>

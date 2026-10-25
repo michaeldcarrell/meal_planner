@@ -11,7 +11,13 @@
 
 <div class="note mt-4 d-flex align-items-center justify-content-between gap-3 flex-wrap">
     <span>Not feeling it?</span>
-    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#replace-detail" aria-controls="replace-detail">Swap this {{ meal.get_meal_type_display|lower }}</button>
+    <div class="d-flex gap-2">
+        <form method="post" action="{% url 'remove_meal' meal.pk %}"
+              data-confirm="Remove {{ meal.recipe.name }} from {{ meal.date|date:'l' }}? It won't be re-planned this week.">{% csrf_token %}
+            <button class="btn btn-outline-danger">Remove</button>
+        </form>
+        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#replace-detail" aria-controls="replace-detail">Swap this {{ meal.get_meal_type_display|lower }}</button>
+    </div>
 </div>
 {% include "meals/_replace_sheet.html" with sheet_id="detail" next=request.path %}
 {% endblock %}

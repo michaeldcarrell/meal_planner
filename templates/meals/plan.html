@@ -89,6 +89,12 @@
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="{% if meal.locked %}M8 11V7a4 4 0 0 1 8 0v4{% else %}M8 11V7a4 4 0 0 1 7.5-2{% endif %}"></path></svg>
                     </button>
                 </form>
+                <form method="post" action="{% url 'remove_meal' meal.pk %}"
+                      data-confirm="Remove {{ meal.recipe.name }} from {{ meal.date|date:'l' }}? It won't be re-planned this week.">{% csrf_token %}
+                    <button class="icon-button icon-button-danger" aria-label="Remove {{ meal.recipe.name }} from this week" title="Remove from this week">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
+                    </button>
+                </form>
                 <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#replace-{{ meal.pk }}" aria-controls="replace-{{ meal.pk }}">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"></path><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"></path><path d="M21 13v2a3 3 0 0 1-3 3H3"></path></svg>
                     Swap

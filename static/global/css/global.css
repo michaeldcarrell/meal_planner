@@ -279,6 +279,16 @@ body {
     background: var(--mp-accent-soft);
 }
 
+.icon-button-danger {
+    color: var(--mp-muted);
+}
+
+.icon-button-danger:hover {
+    color: var(--mp-dislike);
+    border-color: var(--mp-dislike);
+    background: var(--mp-dislike-soft);
+}
+
 /* Summary strip: three stats side by side with dividers. */
 .stat-strip {
     display: grid;

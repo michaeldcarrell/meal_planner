@@ -125,7 +125,8 @@ class PlanServiceTests(TestCase):
         self.client.force_login(self.user)
         page = self.client.get(f'/plan/{SUNDAY}/')
         self.assertContains(page, 'Add a meal to this week')
-        self.assertContains(page, 'Remove from this week')
+        self.assertContains(page, f'aria-label="Remove {plan.meals.first().recipe.name} from this week"')
+        self.assertContains(self.client.get(f'/meals/{plan.meals.first().pk}/'), f'/meals/{plan.meals.first().pk}/remove/')
         response = self.client.post(f'/plan/{SUNDAY}/add/', {
             'date': '2026-10-25', 'meal_type': 'breakfast', 'recipe_id': favorite.pk})
         meal = plan.meals.get(meal_type='breakfast')
