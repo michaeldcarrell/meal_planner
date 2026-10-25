@@ -149,23 +149,32 @@ def push_to_cart(plan: MealPlan, grocery_items: list[str], user) -> CartPush:
     return CartPush.objects.create(plan=plan, user=user, results=results)
 
 
-def send_plan_email(plan: MealPlan) -> list[str]:
-    recipients = list(AllowedUser.objects.filter(receives_plan_email=True).values_list('email', flat=True))
-    if not recipients:
-        return []
+def plan_email_context(plan: MealPlan) -> dict:
     base = settings.APP_BASE_URL
     meals = list(plan.meals.select_related('recipe'))
+    minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
     previous = MealPlan.objects.filter(week_start=plan.week_start - timedelta(days=7)).first()
-    context = {
+    return {
         'plan': plan,
         'meals': [{'meal': m, 'url': base + reverse('meal_detail', args=[m.pk])} for m in meals],
+        'avg_minutes': round(sum(minutes) / len(minutes)) if minutes else None,
+        'favorites': sum(1 for m in meals if m.recipe.score > 0),
         'last_week': [
             {'meal': m, 'url': base + reverse('meal_detail', args=[m.pk])}
             for m in (previous.meals.select_related('recipe') if previous else [])
         ],
         'plan_url': base + reverse('plan', args=[plan.week_start.isoformat()]),
         'groceries_url': base + reverse('groceries', args=[plan.week_start.isoformat()]),
+        'preferences_url': base + reverse('preferences'),
+        'base_url': base,
     }
+
+
+def send_plan_email(plan: MealPlan) -> list[str]:
+    recipients = list(AllowedUser.objects.filter(receives_plan_email=True).values_list('email', flat=True))
+    if not recipients:
+        return []
+    context = plan_email_context(plan)
     message = EmailMultiAlternatives(
         subject=f'Dinners for the week of {plan.week_start:%b %-d}',
         body=render_to_string('email/plan_summary.txt', context),

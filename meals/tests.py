@@ -125,6 +125,10 @@ class PlanServiceTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(sorted(mail.outbox[0].to), ['mike@example.com', 'partner@example.com'])
         self.assertIn('Dish Mon', mail.outbox[0].body)
+        html = mail.outbox[0].alternatives[0][0]
+        self.assertIn('Oct 25 – Oct 31', html)
+        self.assertIn('/preferences/', html)
+        self.assertEqual(html.count('Rate or swap'), 5)
         self.client.post(url, body, content_type='application/json', headers=headers)
         self.assertEqual(len(mail.outbox), 1)
 

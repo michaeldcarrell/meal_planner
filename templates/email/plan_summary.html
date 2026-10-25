@@ -1,24 +1,136 @@
-<div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 600px; color: #222;">
-  <h2 style="margin-bottom: 4px;">🍽 Dinners for the week of {{ plan.week_start|date:"M j" }}</h2>
-  <p style="margin-top: 0; color: #666;">Tap a meal to see the recipe, rate it, or swap it for something else.</p>
-  {% for m in meals %}
-  <div style="border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;">
-    <div style="color: #888; font-size: 13px;">{{ m.meal.date|date:"l, M j" }} · {{ m.meal.recipe.total_minutes|default:"?" }} min · {{ m.meal.recipe.cuisine }}</div>
-    <div style="font-size: 17px; font-weight: 600; margin: 2px 0 4px;"><a href="{{ m.url }}" style="color: #0b5ed7; text-decoration: none;">{{ m.meal.recipe.name }}</a></div>
-    <div style="font-size: 14px;">{{ m.meal.recipe.summary }}</div>
-    <div style="margin-top: 8px; font-size: 14px;"><a href="{{ m.url }}" style="color: #0b5ed7;">👍 / 👎 / Replace</a></div>
-  </div>
-  {% endfor %}
-  <p>
-    <a href="{{ plan_url }}" style="display: inline-block; background: #0b5ed7; color: #fff; padding: 8px 14px; border-radius: 6px; text-decoration: none;">Open the plan</a>
-    &nbsp;
-    <a href="{{ groceries_url }}" style="display: inline-block; border: 1px solid #0b5ed7; color: #0b5ed7; padding: 7px 14px; border-radius: 6px; text-decoration: none;">🛒 Groceries &amp; cart</a>
-  </p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>Dinners for the week of {{ plan.week_start|date:"M j" }}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+{# Inline styles carry the light "Cast Iron" palette; clients that honour dark mode get the dark one below. #}
+<style>
+  a { text-decoration: none; }
+  @media (max-width: 480px) {
+    .px { padding-left: 16px !important; padding-right: 16px !important; }
+    .title { font-size: 22px !important; }
+    .btn { display: block !important; margin: 0 0 10px 0 !important; text-align: center !important; }
+  }
+  @media (prefers-color-scheme: dark) {
+    .bg { background: #15120f !important; }
+    .card { background: #1f1b17 !important; border-color: #352e27 !important; }
+    .line { border-color: #27221d !important; }
+    .box { border-color: #352e27 !important; }
+    .ink { color: #efe9e1 !important; }
+    .muted { color: #a99f93 !important; }
+    .dim { color: #776e63 !important; }
+    .accent { color: #f2a65a !important; }
+    .tag { color: #a99f93 !important; border-color: #352e27 !important; }
+    .btn-primary { background: #f2a65a !important; border-color: #f2a65a !important; color: #2a1705 !important; }
+    .btn-outline { border-color: #352e27 !important; color: #efe9e1 !important; }
+  }
+</style>
+</head>
+<body class="bg" style="margin:0; padding:0; background:#f7f3ee;">
+<div style="display:none; max-height:0; overflow:hidden; opacity:0;">{% for m in meals %}{{ m.meal.date|date:"D" }}: {{ m.meal.recipe.name }}{% if not forloop.last %} · {% endif %}{% endfor %}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background:#f7f3ee;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; font-family:'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#1e1914;">
+
+  <tr><td class="px" style="padding:0 24px 16px;">
+    <a href="{{ base_url }}" class="accent" style="font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:12px; font-weight:600; letter-spacing:1.2px; text-transform:uppercase; color:#b4531b; text-decoration:none;">🍽 Meal Planner</a>
+  </td></tr>
+
+  <tr><td class="card" style="background:#ffffff; border:1px solid #e2d9ce; border-radius:12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+      <tr><td class="px" style="padding:24px 24px 0;">
+        <div class="muted" style="font-size:12px; font-weight:600; letter-spacing:1.2px; text-transform:uppercase; color:#6b6156;">This week's dinners</div>
+        <h1 class="title ink" style="margin:6px 0 0; font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:26px; font-weight:600; letter-spacing:-0.5px; text-transform:uppercase; color:#1e1914;">{{ plan.week_start|date:"M j" }} – {{ plan.week_end|date:"M j" }}</h1>
+        <p class="muted" style="margin:6px 0 0; font-size:14px; line-height:1.5; color:#6b6156;">Tap a dinner for the recipe, to rate it, or to swap it for something else.</p>
+      </td></tr>
+
+      <tr><td class="px" style="padding:20px 24px 4px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="box" style="border:1px solid #e2d9ce; border-radius:8px;">
+          <tr>
+            <td width="33%" style="padding:12px;">
+              <div class="muted" style="font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b6156;">Dinners</div>
+              <div class="ink" style="margin-top:4px; font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:18px; font-weight:600; color:#1e1914;">{{ meals|length }}</div>
+            </td>
+            <td width="34%" class="box" style="padding:12px; border-left:1px solid #e2d9ce;">
+              <div class="muted" style="font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b6156;">Avg time</div>
+              <div class="ink" style="margin-top:4px; font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:18px; font-weight:600; color:#1e1914;">{% if avg_minutes %}{{ avg_minutes }} min{% else %}—{% endif %}</div>
+            </td>
+            <td width="33%" class="box" style="padding:12px; border-left:1px solid #e2d9ce;">
+              <div class="muted" style="font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b6156;">Favorites</div>
+              <div class="ink" style="margin-top:4px; font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:18px; font-weight:600; color:#1e1914;">{{ favorites }}</div>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+
+      {% for m in meals %}
+      <tr><td class="px" style="padding:0 24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td width="48" valign="top" align="center" class="line" style="padding:18px 0;{% if not forloop.last %} border-bottom:1px solid #eee8e0;{% endif %} font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; line-height:1.1;">
+              <div class="muted" style="font-size:11px; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:#6b6156;">{{ m.meal.date|date:"D" }}</div>
+              <div class="ink" style="font-size:22px; font-weight:600; color:#1e1914;">{{ m.meal.date|date:"j" }}</div>
+            </td>
+            <td valign="top" class="line" style="padding:18px 0 18px 14px;{% if not forloop.last %} border-bottom:1px solid #eee8e0;{% endif %}">
+              <a href="{{ m.url }}" class="ink" style="font-size:17px; font-weight:600; line-height:1.3; color:#1e1914; text-decoration:none;">{{ m.meal.recipe.name }}</a>
+              <div style="margin-top:6px;">
+                <span class="tag" style="display:inline-block; padding:1px 6px; border:1px solid #e2d9ce; border-radius:4px; font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:10px; font-weight:500; letter-spacing:0.5px; text-transform:uppercase; color:#6b6156;">{{ m.meal.recipe.total_minutes|default:"?" }} min</span>
+                {% if m.meal.recipe.cuisine %}<span class="tag" style="display:inline-block; padding:1px 6px; border:1px solid #e2d9ce; border-radius:4px; font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:10px; font-weight:500; letter-spacing:0.5px; text-transform:uppercase; color:#6b6156;">{{ m.meal.recipe.cuisine }}</span>{% endif %}
+              </div>
+              {% if m.meal.recipe.summary %}<p class="muted" style="margin:8px 0 0; font-size:14px; line-height:1.5; color:#6b6156;">{{ m.meal.recipe.summary }}</p>{% endif %}
+              <a href="{{ m.url }}" class="accent" style="display:inline-block; margin-top:8px; font-size:14px; font-weight:600; color:#b4531b; text-decoration:none;">Rate or swap →</a>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+      {% endfor %}
+
+      <tr><td class="px" style="padding:20px 24px 24px;">
+        <a href="{{ plan_url }}" class="btn btn-primary" style="display:inline-block; margin-right:8px; padding:10px 18px; border:1px solid #b4531b; border-radius:8px; background:#b4531b; color:#ffffff; font-size:15px; font-weight:600; text-decoration:none;">Open the week</a>
+        <a href="{{ groceries_url }}" class="btn btn-outline" style="display:inline-block; padding:10px 18px; border:1px solid #e2d9ce; border-radius:8px; color:#1e1914; font-size:15px; font-weight:600; text-decoration:none;">Grocery list</a>
+      </td></tr>
+
+    </table>
+  </td></tr>
+
   {% if last_week %}
-  <h3 style="margin-top: 24px;">How was last week?</h3>
-  <p style="color: #666; margin-top: 0;">Ratings teach the planner what to bring back.</p>
-  <ul>
-    {% for m in last_week %}<li><a href="{{ m.url }}">{{ m.meal.recipe.name }}</a></li>{% endfor %}
-  </ul>
+  <tr><td style="padding-top:16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="background:#ffffff; border:1px solid #e2d9ce; border-radius:12px;">
+      <tr><td class="px" style="padding:20px 24px 8px;">
+        <div class="ink" style="font-family:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size:14px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; color:#1e1914;">How was last week?</div>
+        <p class="muted" style="margin:4px 0 0; font-size:14px; line-height:1.5; color:#6b6156;">Ratings teach the planner what to bring back.</p>
+      </td></tr>
+      {% for m in last_week %}
+      <tr><td class="px" style="padding:0 24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td class="line" style="padding:12px 0;{% if not forloop.last %} border-bottom:1px solid #eee8e0;{% endif %}">
+              <a href="{{ m.url }}" class="ink" style="font-size:15px; color:#1e1914; text-decoration:none;">{{ m.meal.recipe.name }}</a>
+            </td>
+            <td align="right" class="line" style="padding:12px 0 12px 12px; white-space:nowrap;{% if not forloop.last %} border-bottom:1px solid #eee8e0;{% endif %}">
+              <a href="{{ m.url }}" class="accent" style="font-size:14px; font-weight:600; color:#b4531b; text-decoration:none;">Rate →</a>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+      {% endfor %}
+      <tr><td style="padding-bottom:12px;"></td></tr>
+    </table>
+  </td></tr>
   {% endif %}
-</div>
+
+  <tr><td class="px dim" style="padding:20px 24px 0; font-size:12px; line-height:1.6; color:#978b7e;">
+    Planned around your household's <a href="{{ preferences_url }}" class="muted" style="color:#6b6156; text-decoration:underline;">food preferences</a>.
+    Sent by Meal Planner every Sunday.
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

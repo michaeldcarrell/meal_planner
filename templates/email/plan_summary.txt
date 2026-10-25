@@ -1,12 +1,16 @@
-Dinners for the week of {{ plan.week_start|date:"M j" }}
+MEAL PLANNER — DINNERS {{ plan.week_start|date:"M j"|upper }} – {{ plan.week_end|date:"M j"|upper }}
+{{ meals|length }} dinners{% if avg_minutes %} · {{ avg_minutes }} min on average{% endif %}{% if favorites %} · {{ favorites }} favorite{{ favorites|pluralize }}{% endif %}
 {% for m in meals %}
-{{ m.meal.date|date:"l" }}: {{ m.meal.recipe.name }} ({{ m.meal.recipe.total_minutes|default:"?" }} min)
-  {{ m.meal.recipe.summary }}
-  Rate or replace: {{ m.url }}
+{{ m.meal.date|date:"D j"|upper }}  {{ m.meal.recipe.name }}
+  {{ m.meal.recipe.total_minutes|default:"?" }} min{% if m.meal.recipe.cuisine %} · {{ m.meal.recipe.cuisine }}{% endif %}
+{% if m.meal.recipe.summary %}  {{ m.meal.recipe.summary }}
+{% endif %}  Rate or swap: {{ m.url }}
 {% endfor %}
-Full plan: {{ plan_url }}
-Grocery list / King Soopers cart: {{ groceries_url }}
+Open the week: {{ plan_url }}
+Grocery list: {{ groceries_url }}
 {% if last_week %}
-How was last week? Rate these so the planner learns:
+HOW WAS LAST WEEK?
+Ratings teach the planner what to bring back.
 {% for m in last_week %}- {{ m.meal.recipe.name }}: {{ m.url }}
 {% endfor %}{% endif %}
+Food preferences: {{ preferences_url }}
