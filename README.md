@@ -29,7 +29,8 @@ King Soopers cart through the Kroger API.
 
 1. **Database** — create a `meal_planner` database on the host Postgres. Migrations run
    automatically when the container starts.
-2. **`.env`** — set these variables (names only; never commit the file):
+2. **Environment** — set these in the Portainer stack's *Environment variables* (Portainer writes
+   them to `stack.env`; for a local `docker compose up`, put them in a `stack.env` here). Never commit either:
    - `SECRET_KEY`, `APP_BASE_URL` (e.g. `https://meals.carrell.us`)
    - `DB_HOST` (`host.docker.internal`), `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT`
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth client for Google sign-in. Add
@@ -40,10 +41,11 @@ King Soopers cart through the Kroger API.
      redirect URI `<APP_BASE_URL>/kroger/callback/`; the app needs the Cart, Products and
      Identity APIs.
    - `INTERNAL_API_SECRET` — the same value as `MEAL_PLANNER_SECRET` in Airflow's `.env`
-3. **Google Calendar** — put a service account JSON key at `secrets/google_service_account.json`.
+3. **Google Calendar** — put a service account JSON key at
+   `/home/michael/apps/meal_planner/secrets/google_service_account.json` (mounted by absolute path).
    The existing gspread service account works if the Calendar API is enabled for its project.
    Share the target calendar with the service account's email ("Make changes to events").
-4. **Start** — run `docker compose up -d --build`. The app listens on host port 8006 and joins
+4. **Start** — deploy the Portainer stack (git-backed, this repo). The app listens on host port 8006 and joins
    the `proxy` network as `meal_planner`. Add an NPM proxy host and a Pi-hole record for the
    public hostname.
 5. **First run** — run `docker exec -it meal_planner python manage.py createsuperuser`. Then in

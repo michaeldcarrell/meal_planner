@@ -3,13 +3,17 @@ services:
     build: .
     container_name: meal_planner
     restart: unless-stopped
+    # Deployed as a git-backed Portainer stack: Portainer writes the stack's
+    # environment variables to stack.env in its own checkout of this repo.
     env_file:
-      - .env
+      - stack.env
     ports:
       - "8006:8000"
     volumes:
       # Google service account key for Calendar (not committed; see README).
-      - ./secrets:/app/secrets:ro
+      # Absolute path: Portainer runs compose from its own checkout, so a
+      # relative ./secrets would point at an empty directory there.
+      - /home/michael/apps/meal_planner/secrets:/app/secrets:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
