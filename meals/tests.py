@@ -142,6 +142,57 @@ class PlanServiceTests(TestCase):
         plan.refresh_from_db()
         self.assertEqual(plan.slot_overrides, {'2026-10-25:breakfast': False})
 
+    @mock.patch('meals.calendar_sync.move_meal_event')
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_move_meal_to_a_free_day_and_trade_with_a_taken_one(self, choose, move_event, delete_event, sync):
+        plan = services.generate_week(SUNDAY)
+        monday = plan.meals.get(date=date(2026, 10, 26))
+        monday.locked = True
+        monday.save()
+
+        # To a free day: the meal moves, and the week remembers so neither day is re-planned wrongly.
+        moved = services.move_meal(monday, date(2026, 10, 31))
+        self.assertEqual((moved.pk, moved.date, moved.recipe.name), (monday.pk, date(2026, 10, 31), 'Dish Mon'))
+        move_event.assert_called_once_with(moved, 5)
+        services.generate_week(SUNDAY, regenerate=True)
+        self.assertFalse(plan.meals.filter(date=date(2026, 10, 26)).exists())
+        self.assertTrue(plan.meals.filter(date=date(2026, 10, 31), locked=True).exists())
+
+        # To a taken day: the two trade places, lock and calendar event included.
+        move_event.reset_mock()
+        saturday = plan.meals.get(date=date(2026, 10, 31))
+        saturday.calendar_event_id = 'evt-sat'
+        saturday.save()
+        tuesday = plan.meals.get(date=date(2026, 10, 27))
+        tuesday.calendar_event_id = 'evt-tue'
+        tuesday.save()
+        tuesday_recipe = tuesday.recipe
+        landed = services.move_meal(saturday, date(2026, 10, 27))
+        self.assertEqual(landed.pk, tuesday.pk)
+        self.assertEqual((landed.recipe.name, landed.locked, landed.calendar_event_id), ('Dish Mon', True, 'evt-sat'))
+        saturday.refresh_from_db()
+        self.assertEqual((saturday.recipe, saturday.locked, saturday.calendar_event_id), (tuesday_recipe, False, 'evt-tue'))
+        self.assertEqual(sorted((m.pk, d) for m, d in (c.args for c in move_event.call_args_list)),
+                         sorted([(tuesday.pk, -4), (saturday.pk, 4)]))
+        with self.assertRaises(ValueError):
+            services.move_meal(saturday, date(2026, 11, 2))
+
+    @mock.patch('meals.calendar_sync.move_meal_event')
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_move_from_the_week_page(self, choose, move_event, delete_event, sync):
+        plan = services.generate_week(SUNDAY)
+        meal = plan.meals.get(date=date(2026, 10, 26))
+        self.client.force_login(self.user)
+        page = self.client.get(f'/plan/{SUNDAY}/')
+        self.assertContains(page, f'aria-label="Move {meal.recipe.name} to another day"')
+        self.assertContains(page, 'Trade with Dish Tue')
+        self.assertContains(self.client.get(f'/meals/{meal.pk}/'), f'/meals/{meal.pk}/move/')
+        response = self.client.post(f'/meals/{meal.pk}/move/', {'date': '2026-10-25'})
+        self.assertRedirects(response, f'/plan/{SUNDAY}/#meal-{meal.pk}', fetch_redirect_response=False)
+        meal.refresh_from_db()
+        self.assertEqual(meal.date, SUNDAY)
+        self.assertEqual(self.client.post(f'/meals/{meal.pk}/move/', {'date': 'soon'}).status_code, 400)
+
     def test_resolve_recipe_reuses_known_recipe(self, *_):
         known = Recipe.objects.create(name='Tacos')
         choice = planner.MealChoice(date='2026-10-26', meal_type='dinner', existing_recipe_id=known.pk, new_recipe=None,
@@ -385,6 +436,33 @@ class CalendarSyncTests(TestCase):
         self.assertEqual((body['start']['dateTime'], body['end']['dateTime']),
                          ('2026-10-26T08:00:00', '2026-10-26T08:30:00'))
         self.assertEqual(body['summary'], '🍳 Tacos')
+
+    def test_move_shifts_the_event_keeping_its_time(self):
+        self.meal.calendar_event_id = 'evt1'
+        self.meal.date = date(2026, 11, 2)
+        self.meal.save()
+        # Someone moved it to 7pm in Google; it's the Monday before DST ends (UTC-6 then, UTC-7 after).
+        self.events.get.return_value.execute.return_value = {
+            'start': {'dateTime': '2026-10-26T19:00:00-06:00', 'timeZone': 'America/Denver'},
+            'end': {'dateTime': '2026-10-26T20:30:00-06:00', 'timeZone': 'America/Denver'},
+        }
+        calendar_sync.move_meal_event(self.meal, 7)
+        body = self.events.patch.call_args.kwargs['body']
+        self.assertEqual(body['start'], {'dateTime': '2026-11-02T19:00:00', 'timeZone': 'America/Denver'})
+        self.assertEqual(body['end'], {'dateTime': '2026-11-02T20:30:00', 'timeZone': 'America/Denver'})
+        self.assertEqual(body['summary'], '🍽 Tacos')
+        self.events.insert.assert_not_called()
+
+    def test_move_recreates_a_missing_event_on_the_new_day(self):
+        from googleapiclient.errors import HttpError
+        self.meal.calendar_event_id = 'gone'
+        self.meal.date = date(2026, 10, 28)
+        self.meal.save()
+        self.events.get.return_value.execute.side_effect = HttpError(mock.Mock(status=404), b'')
+        calendar_sync.move_meal_event(self.meal, 2)
+        self.assertEqual(self.events.insert.call_args.kwargs['body']['start']['dateTime'], '2026-10-28T17:30:00')
+        self.meal.refresh_from_db()
+        self.assertEqual(self.meal.calendar_event_id, 'evt1')
 
     def test_event_deleted_in_google_is_recreated(self):
         from googleapiclient.errors import HttpError

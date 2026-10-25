@@ -1,0 +1,21 @@
+<div class="offcanvas offcanvas-bottom app-sheet" tabindex="-1" id="move-{{ sheet_id }}" aria-labelledby="move-{{ sheet_id }}-label">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="offcanvas-header pb-2">
+        <div class="min-w-0">
+            <p class="eyebrow">Move {{ meal.date|date:"l" }}{% if meal.meal_type != 'dinner' %} {{ meal.get_meal_type_display|lower }}{% endif %}</p>
+            <h2 class="offcanvas-title fs-5 fw-semibold text-truncate" id="move-{{ sheet_id }}-label">{{ meal.recipe.name }}</h2>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body pt-0">
+        <form method="post" action="{% url 'move_meal' meal.pk %}" class="move-days">{% csrf_token %}
+            {% for day, there in meal.move_options %}
+            <button name="date" value="{{ day|date:'Y-m-d' }}" class="move-day">
+                <span class="move-day-date">{{ day|date:"D j" }}</span>
+                <span class="move-day-what">{% if there %}Trade with {{ there.recipe.name }}{% else %}No {{ meal.get_meal_type_display|lower }} yet{% endif %}</span>
+            </button>
+            {% endfor %}
+        </form>
+        <p class="small text-body-secondary mt-3 mb-0">The calendar event moves too, keeping its time.</p>
+    </div>
+</div>

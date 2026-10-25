@@ -17,6 +17,7 @@ urlpatterns = [
     path("meals/<int:pk>/", views.MealDetail.as_view(), name="meal_detail"),
     path("meals/<int:pk>/replace/", views.ReplaceMeal.as_view(), name="replace_meal"),
     path("meals/<int:pk>/lock/", views.ToggleLock.as_view(), name="toggle_lock"),
+    path("meals/<int:pk>/move/", views.MoveMeal.as_view(), name="move_meal"),
     path("meals/<int:pk>/remove/", views.RemoveMeal.as_view(), name="remove_meal"),
     path("recipes/", views.RecipeList.as_view(), name="recipes"),
     path("recipes/<int:pk>/", views.RecipeDetail.as_view(), name="recipe_detail"),

@@ -10,8 +10,9 @@
 {% include "meals/_recipe_body.html" %}
 
 <div class="note mt-4 d-flex align-items-center justify-content-between gap-3 flex-wrap">
-    <span>Not feeling it?</span>
-    <div class="d-flex gap-2">
+    <span>Change of plans?</span>
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#move-detail" aria-controls="move-detail">Move</button>
         <form method="post" action="{% url 'remove_meal' meal.pk %}"
               data-confirm="Remove {{ meal.recipe.name }} from {{ meal.date|date:'l' }}? It won't be re-planned this week.">{% csrf_token %}
             <button class="btn btn-outline-danger">Remove</button>
@@ -20,4 +21,5 @@
     </div>
 </div>
 {% include "meals/_replace_sheet.html" with sheet_id="detail" next=request.path %}
+{% include "meals/_move_sheet.html" with sheet_id="detail" %}
 {% endblock %}

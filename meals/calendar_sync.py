@@ -1,7 +1,8 @@
 """Mirror PlannedMeals onto a shared Google Calendar via a service account."""
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.urls import reverse
@@ -94,6 +95,37 @@ def sync_meal(meal: PlannedMeal):
     created = events.insert(calendarId=household.calendar_id, body=body).execute()
     meal.calendar_event_id = created['id']
     meal.save(update_fields=['calendar_event_id'])
+
+
+def _shift(when: dict, days: int) -> dict:
+    """An event start/end moved by `days` on the calendar, keeping its local time across DST changes."""
+    if 'date' in when:  # all-day event
+        return {'date': (date.fromisoformat(when['date']) + timedelta(days=days)).isoformat()}
+    zone = when.get('timeZone') or settings.TIME_ZONE
+    local = datetime.fromisoformat(when['dateTime']).astimezone(ZoneInfo(zone)).replace(tzinfo=None)
+    return {'dateTime': (local + timedelta(days=days)).isoformat(), 'timeZone': zone}
+
+
+def move_meal_event(meal: PlannedMeal, days: int):
+    """Move the meal's event `days` days (after its date changed), keeping the time and length it has
+    in Google Calendar. An event that's missing is recreated at the household's default time."""
+    household = HouseholdSettings.load()
+    if not household.calendar_id:
+        return
+    if meal.calendar_event_id:
+        events = _service().events()
+        try:
+            event = events.get(calendarId=household.calendar_id, eventId=meal.calendar_event_id).execute()
+        except HttpError as e:
+            if e.resp.status not in (404, 410):
+                raise
+            logger.info('Calendar event %s gone; recreating', meal.calendar_event_id)
+        else:
+            body = {**_event_content(meal), 'start': _shift(event['start'], days), 'end': _shift(event['end'], days)}
+            events.patch(calendarId=household.calendar_id, eventId=meal.calendar_event_id, body=body).execute()
+            return
+        meal.calendar_event_id = ''
+    sync_meal(meal)
 
 
 def delete_meal_event(meal: PlannedMeal):

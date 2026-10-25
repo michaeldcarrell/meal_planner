@@ -61,6 +61,12 @@ def _setup_steps() -> list[dict] | None:
     return None if all(step['done'] for step in steps) else steps
 
 
+def _move_options(meal: PlannedMeal, meals) -> list[tuple]:
+    """(day, meal already there or None) for every other day of the meal's week."""
+    taken = {m.date: m for m in meals if m.meal_type == meal.meal_type}
+    return [(day, taken.get(day)) for day in meal.plan.days if day != meal.date]
+
+
 class PlanView(LoginRequiredMixin, View):
     def get(self, request, week_start):
         try:
@@ -76,6 +82,7 @@ class PlanView(LoginRequiredMixin, View):
                          .filter(total__gt=0).order_by('name'))
         for meal in meals:
             meal.swap_favorites = [r for r in favorites if r.pk != meal.recipe_id]
+            meal.move_options = _move_options(meal, meals)
         minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
         return render(request, 'meals/plan.html', {
             'setup_steps': _setup_steps(),
@@ -120,6 +127,7 @@ class EmailPlan(LoginRequiredMixin, View):
 class MealDetail(LoginRequiredMixin, View):
     def get(self, request, pk):
         meal = get_object_or_404(PlannedMeal.objects.select_related('recipe', 'plan'), pk=pk)
+        meal.move_options = _move_options(meal, meal.plan.meals.select_related('recipe'))
         return render(request, 'meals/meal_detail.html', {
             'meal': meal,
             'recipe': meal.recipe,
@@ -193,6 +201,23 @@ class AddMeal(LoginRequiredMixin, View):
             logger.exception('add_meal failed for %s %s', day, meal_type)
             messages.error(request, f'Could not add that meal: {e}')
         return redirect('plan', week_start)
+
+
+class MoveMeal(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        meal = get_object_or_404(PlannedMeal.objects.select_related('plan', 'recipe'), pk=pk)
+        try:
+            day = date.fromisoformat(request.POST.get('date', ''))
+        except ValueError:
+            return HttpResponseBadRequest()
+        name, from_day = meal.recipe.name, meal.date
+        try:
+            moved = services.move_meal(meal, day)
+        except ValueError as e:
+            messages.error(request, str(e))
+            return redirect('plan', meal.plan.week_start.isoformat())
+        messages.success(request, f'Moved {name} from {from_day:%A} to {day:%A}.')
+        return redirect(f'/plan/{meal.plan.week_start.isoformat()}/#meal-{moved.pk}')
 
 
 class RemoveMeal(LoginRequiredMixin, View):

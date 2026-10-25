@@ -20,7 +20,8 @@ King Soopers cart through the Kroger API.
      dish plus the hint are remembered as a soft dislike.
    - **Lock** a dinner, so that *Regenerate unlocked* keeps it.
    - **Add** a meal to just this week (pick a day, breakfast/lunch/dinner, and a favorite or a
-     suggestion), or **remove** one with its trash button. Removed meals aren't re-planned that week.
+     suggestion), **move** one to another day (it trades places if that day is taken, and its
+     calendar event moves too, keeping its time), or **remove** one with its trash button. Removed meals aren't re-planned that week.
    - **Never suggest** a recipe again (archive it).
 3. **Shopping** — the Groceries page merges every ingredient by grocery item and leaves
    pantry staples unchecked. *Add to King Soopers cart* matches each item to a product at your

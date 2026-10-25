@@ -115,6 +115,43 @@ def remove_meal(meal: PlannedMeal):
     _remove_meal(meal)
 
 
+def move_meal(meal: PlannedMeal, day: date) -> PlannedMeal:
+    """Move a meal to another day of its week; if that day already has this kind of meal, the two
+    trade places. Calendar events move with them. Returns the row now on `day`."""
+    plan = meal.plan
+    if day not in plan.days:
+        raise ValueError(f'{day} is not in the week of {plan.week_start}.')
+    days = (day - meal.date).days
+    if not days:
+        return meal
+    other = plan.meals.filter(date=day, meal_type=meal.meal_type).first()
+    if other:
+        # Trade what's planned rather than the dates, so each row keeps its (date, meal_type) slot
+        # and the unique constraint holds throughout.
+        fields = ['recipe', 'why', 'locked', 'calendar_event_id']
+        for field in fields:
+            mine, theirs = getattr(meal, field), getattr(other, field)
+            setattr(meal, field, theirs)
+            setattr(other, field, mine)
+        with transaction.atomic():
+            meal.save(update_fields=fields)
+            other.save(update_fields=fields)
+        moves, moved = [(other, days), (meal, -days)], other
+    else:
+        old_date = meal.date
+        meal.date = day
+        meal.save(update_fields=['date'])
+        _set_override(plan, old_date, meal.meal_type, False)
+        _set_override(plan, day, meal.meal_type, True)
+        moves, moved = [(meal, days)], meal
+    for m, shift in moves:
+        try:
+            calendar_sync.move_meal_event(m, shift)
+        except Exception:
+            logger.exception('Calendar move failed for meal %s', m.pk)
+    return moved
+
+
 def _remove_meal(meal: PlannedMeal):
     try:
         calendar_sync.delete_meal_event(meal)
