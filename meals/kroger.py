@@ -15,7 +15,6 @@ from meals.models import KrogerAuth
 
 logger = logging.getLogger(__name__)
 
-API_BASE = 'https://api.kroger.com/v1'
 USER_SCOPES = 'cart.basic:write product.compact profile.compact'
 TIMEOUT = 20
 
@@ -36,12 +35,12 @@ def authorize_url(state: str) -> str:
         'redirect_uri': redirect_uri(),
         'state': state,
     })
-    return f'{API_BASE}/connect/oauth2/authorize?{query}'
+    return f'{settings.KROGER_API_BASE}/connect/oauth2/authorize?{query}'
 
 
 def _token_request(data: dict) -> dict:
     response = requests.post(
-        f'{API_BASE}/connect/oauth2/token',
+        f'{settings.KROGER_API_BASE}/connect/oauth2/token',
         data=data,
         auth=(settings.KROGER_CLIENT_ID, settings.KROGER_CLIENT_SECRET),
         timeout=TIMEOUT,
@@ -89,7 +88,7 @@ def is_connected() -> bool:
 
 def search_products(term: str, location_id: str, limit: int = 5, token: str | None = None) -> list[dict]:
     response = requests.get(
-        f'{API_BASE}/products',
+        f'{settings.KROGER_API_BASE}/products',
         params={'filter.term': term, 'filter.locationId': location_id, 'filter.limit': limit},
         headers={'Authorization': f'Bearer {token or _app_token()}', 'Accept': 'application/json'},
         timeout=TIMEOUT,
@@ -100,7 +99,7 @@ def search_products(term: str, location_id: str, limit: int = 5, token: str | No
 
 def find_locations(zip_code: str) -> list[dict]:
     response = requests.get(
-        f'{API_BASE}/locations',
+        f'{settings.KROGER_API_BASE}/locations',
         params={'filter.zipCode.near': zip_code, 'filter.limit': 20},
         headers={'Authorization': f'Bearer {_app_token()}', 'Accept': 'application/json'},
         timeout=TIMEOUT,
@@ -112,7 +111,7 @@ def find_locations(zip_code: str) -> list[dict]:
 def add_to_cart(items: list[dict]):
     """`items` are {"upc", "quantity"}; added for pickup."""
     response = requests.put(
-        f'{API_BASE}/cart/add',
+        f'{settings.KROGER_API_BASE}/cart/add',
         json={'items': [{'upc': i['upc'], 'quantity': i.get('quantity', 1), 'modality': 'PICKUP'} for i in items]},
         headers={'Authorization': f'Bearer {_user_token()}', 'Accept': 'application/json'},
         timeout=TIMEOUT,

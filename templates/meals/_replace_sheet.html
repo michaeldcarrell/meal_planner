@@ -1,0 +1,28 @@
+<div class="offcanvas offcanvas-bottom app-sheet" tabindex="-1" id="replace-{{ sheet_id }}" aria-labelledby="replace-{{ sheet_id }}-label">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="offcanvas-header pb-2">
+        <div class="min-w-0">
+            <p class="eyebrow">Swap {{ meal.date|date:"l" }}</p>
+            <h2 class="offcanvas-title fs-5 fw-semibold text-truncate" id="replace-{{ sheet_id }}-label">{{ meal.recipe.name }}</h2>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body pt-2">
+        <form method="post" action="{% url 'replace_meal' meal.pk %}" class="slow d-grid gap-2">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ next }}">
+            <label class="form-label small text-body-secondary mb-0" for="hint-{{ sheet_id }}">What would you rather have? (optional)</label>
+            <input id="hint-{{ sheet_id }}" name="hint" class="form-control" placeholder="e.g. something quicker, no pasta">
+            <button type="submit" class="btn btn-primary">Suggest something else</button>
+        </form>
+        {% if favorites %}
+        <form method="post" action="{% url 'replace_meal' meal.pk %}" class="d-grid gap-2 mt-4">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ next }}">
+            <label class="form-label small text-body-secondary mb-0" for="fav-{{ sheet_id }}">Or pick a household favorite</label>
+            <select id="fav-{{ sheet_id }}" name="recipe_id" class="form-select">
+                {% for r in favorites %}<option value="{{ r.pk }}">{{ r.name }} (+{{ r.total }})</option>{% endfor %}
+            </select>
+            <button class="btn btn-outline-secondary">Use this favorite</button>
+        </form>
+        {% endif %}
+    </div>
+</div>

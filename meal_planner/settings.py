@@ -77,6 +77,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "meals.context_processors.ui",
             ],
         },
     },
@@ -110,9 +111,10 @@ TIME_ZONE = config('TIME_ZONE', default='America/Denver')
 USE_I18N = True
 USE_TZ = True
 
-# Static files are only the admin's; WhiteNoise serves them from gunicorn.
+# WhiteNoise serves static files (the app's own under static/, plus the admin's) from gunicorn.
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -143,6 +145,9 @@ GOOGLE_SERVICE_ACCOUNT_FILE = config('GOOGLE_SERVICE_ACCOUNT_FILE', default='/ap
 # Kroger (King Soopers) developer app — https://developer.kroger.com
 KROGER_CLIENT_ID = config('KROGER_CLIENT_ID', default='')
 KROGER_CLIENT_SECRET = config('KROGER_CLIENT_SECRET', default='')
+# New developer apps live in the certification environment (https://api-ce.kroger.com/v1)
+# until Kroger approves them for production.
+KROGER_API_BASE = config('KROGER_API_BASE', default='https://api.kroger.com/v1')
 
 # Shared secret Airflow sends to the /internal/ endpoints.
 INTERNAL_API_SECRET = config('INTERNAL_API_SECRET', default='')

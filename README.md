@@ -27,19 +27,23 @@ King Soopers cart through the Kroger API.
 
 ## Setup
 
-1. **Database** — create a `meal_planner` database on the host Postgres. Migrations run
+1. **Database** — create a `meal_planner` database on the same Cloud SQL instance Simpli Budget
+   uses (same `mdc_admin` login; this host is already an authorized network). Migrations run
    automatically when the container starts.
 2. **Environment** — set these in the Portainer stack's *Environment variables* (Portainer writes
    them to `stack.env`; for a local `docker compose up`, put them in a `stack.env` here). Never commit either:
    - `SECRET_KEY`, `APP_BASE_URL` (e.g. `https://meals.carrell.us`)
-   - `DB_HOST` (`host.docker.internal`), `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT`
+   - `DB_HOST`, `DB_USER`, `DB_PASSWORD` — Simpli Budget's `CBA_POSTGRES_DB_HOST/USER/PASS`; `DB_NAME=meal_planner`
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth client for Google sign-in. Add
      `<APP_BASE_URL>/accounts/google/login/callback/` as an authorized redirect URI.
-   - `ANTHROPIC_API_KEY`, and optionally `CLAUDE_MODEL` (default `claude-opus-5-5`)
-   - `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` (Gmail app password), `DEFAULT_FROM_EMAIL`
+   - `ANTHROPIC_API_KEY` (Simpli Budget's), and optionally `CLAUDE_MODEL` (default `claude-opus-5-5`)
+   - `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` — Airflow's `SMTP_LOGIN` / `SMTP_PASSWORD` (Gmail app
+     password); `DEFAULT_FROM_EMAIL` must be an address that account can send as (e.g. `budget@carrell.us`)
    - `KROGER_CLIENT_ID`, `KROGER_CLIENT_SECRET` — from developer.kroger.com. Register the
      redirect URI `<APP_BASE_URL>/kroger/callback/`; the app needs the Cart, Products and
      Identity APIs.
+   - `KROGER_API_BASE` — optional; set to `https://api-ce.kroger.com/v1` while the Kroger app is
+     still in the certification environment (default is production, `https://api.kroger.com/v1`)
    - `INTERNAL_API_SECRET` — the same value as `MEAL_PLANNER_SECRET` in Airflow's `.env`
 3. **Google Calendar** — put a service account JSON key at
    `/home/michael/apps/meal_planner/secrets/google_service_account.json` (mounted by absolute path).

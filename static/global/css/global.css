@@ -1,0 +1,876 @@
+/* ------------------------------------------------------------------
+   Theme tokens ("Cast Iron"). Same shell as Simpli Budget, warmer
+   palette: charcoal and cream with a saffron/paprika accent. Dark is
+   the default; light is opt-in (the `theme` cookie). Use these
+   variables, or the Bootstrap variables mapped onto them below,
+   rather than hard-coded colours so both themes stay in step.
+   ------------------------------------------------------------------ */
+:root,
+[data-bs-theme="dark"] {
+    --mp-bg: #15120f;
+    --mp-surface: #1f1b17;
+    --mp-surface-2: #1a1713;
+    --mp-line: #352e27;
+    --mp-line-soft: #27221d;
+    --mp-ink: #efe9e1;
+    --mp-muted: #a99f93;
+    --mp-dim: #776e63;
+    --mp-accent: #f2a65a;
+    --mp-accent-rgb: 242, 166, 90;
+    --mp-accent-hover: #f6ba7c;
+    --mp-accent-ink: #2a1705;
+    --mp-accent-soft: #2c2117;
+    --mp-like: #93c48b;
+    --mp-like-soft: #1d2a1b;
+    --mp-dislike: #ef7f6d;
+    --mp-dislike-soft: #331c18;
+    --mp-scrim: rgba(8, 6, 4, 0.66);
+}
+
+[data-bs-theme="light"] {
+    --mp-bg: #f7f3ee;
+    --mp-surface: #ffffff;
+    --mp-surface-2: #fbf8f4;
+    --mp-line: #e2d9ce;
+    --mp-line-soft: #eee8e0;
+    --mp-ink: #1e1914;
+    --mp-muted: #6b6156;
+    --mp-dim: #978b7e;
+    --mp-accent: #b4531b;
+    --mp-accent-rgb: 180, 83, 27;
+    --mp-accent-hover: #994514;
+    --mp-accent-ink: #ffffff;
+    --mp-accent-soft: #fbebdf;
+    --mp-like: #3d7a37;
+    --mp-like-soft: #e6f2e3;
+    --mp-dislike: #b8402e;
+    --mp-dislike-soft: #fbe7e3;
+    --mp-scrim: rgba(30, 25, 20, 0.45);
+}
+
+:root {
+    --mp-font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mp-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --mp-tab-bar-height: 64px;
+}
+
+/* Map Bootstrap's own variables onto the tokens. */
+[data-bs-theme="dark"],
+[data-bs-theme="light"] {
+    --bs-body-font-family: var(--mp-font-sans);
+    --bs-font-monospace: var(--mp-font-mono);
+    --bs-body-bg: var(--mp-bg);
+    --bs-body-color: var(--mp-ink);
+    --bs-emphasis-color: var(--mp-ink);
+    --bs-secondary-color: var(--mp-muted);
+    --bs-tertiary-color: var(--mp-dim);
+    --bs-secondary-bg: var(--mp-surface);
+    --bs-tertiary-bg: var(--mp-surface-2);
+    --bs-border-color: var(--mp-line);
+    --bs-border-color-translucent: var(--mp-line);
+    --bs-primary: var(--mp-accent);
+    --bs-primary-rgb: var(--mp-accent-rgb);
+    --bs-link-color: var(--mp-accent);
+    --bs-link-color-rgb: var(--mp-accent-rgb);
+    --bs-link-hover-color: var(--mp-accent-hover);
+    --bs-link-hover-color-rgb: var(--mp-accent-rgb);
+    --bs-focus-ring-color: rgba(var(--mp-accent-rgb), 0.35);
+}
+
+body {
+    background: var(--mp-bg);
+    color: var(--mp-ink);
+}
+
+/* Bootstrap compiles its component colours, so the accent has to be applied per component. */
+.btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.btn-primary {
+    --bs-btn-color: var(--mp-accent-ink);
+    --bs-btn-bg: var(--mp-accent);
+    --bs-btn-border-color: var(--mp-accent);
+    --bs-btn-hover-color: var(--mp-accent-ink);
+    --bs-btn-hover-bg: var(--mp-accent-hover);
+    --bs-btn-hover-border-color: var(--mp-accent-hover);
+    --bs-btn-active-color: var(--mp-accent-ink);
+    --bs-btn-active-bg: var(--mp-accent-hover);
+    --bs-btn-active-border-color: var(--mp-accent-hover);
+    --bs-btn-disabled-color: var(--mp-accent-ink);
+    --bs-btn-disabled-bg: var(--mp-accent);
+    --bs-btn-disabled-border-color: var(--mp-accent);
+    --bs-btn-focus-shadow-rgb: var(--mp-accent-rgb);
+    font-weight: 600;
+}
+
+.btn-outline-secondary {
+    --bs-btn-color: var(--mp-ink);
+    --bs-btn-border-color: var(--mp-line);
+    --bs-btn-hover-color: var(--mp-ink);
+    --bs-btn-hover-bg: var(--mp-surface);
+    --bs-btn-hover-border-color: var(--mp-dim);
+    --bs-btn-active-color: var(--mp-ink);
+    --bs-btn-active-bg: var(--mp-surface);
+    --bs-btn-active-border-color: var(--mp-dim);
+}
+
+.btn-quiet {
+    --bs-btn-color: var(--mp-muted);
+    --bs-btn-hover-color: var(--mp-ink);
+    --bs-btn-active-color: var(--mp-ink);
+    --bs-btn-border-color: transparent;
+    --bs-btn-hover-border-color: transparent;
+    --bs-btn-active-border-color: transparent;
+}
+
+.form-control,
+.form-select {
+    min-height: 44px;
+    background-color: var(--mp-surface);
+    border-color: var(--mp-line);
+    color: var(--mp-ink);
+}
+
+.form-control::placeholder {
+    color: var(--mp-dim);
+}
+
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus {
+    background-color: var(--mp-surface);
+    color: var(--mp-ink);
+    border-color: var(--mp-accent);
+    box-shadow: 0 0 0 0.2rem rgba(var(--mp-accent-rgb), 0.3);
+}
+
+.form-check-input {
+    background-color: var(--mp-surface);
+    border-color: var(--mp-dim);
+}
+
+.form-check-input:checked {
+    background-color: var(--mp-accent);
+    border-color: var(--mp-accent);
+}
+
+.offcanvas {
+    --bs-offcanvas-bg: var(--mp-surface);
+    --bs-offcanvas-border-color: var(--mp-line);
+}
+
+.dropdown-menu {
+    --bs-dropdown-bg: var(--mp-surface);
+    --bs-dropdown-border-color: var(--mp-line);
+    --bs-dropdown-link-color: var(--mp-ink);
+    --bs-dropdown-link-hover-bg: var(--mp-surface-2);
+    --bs-dropdown-link-active-bg: var(--mp-accent);
+    --bs-dropdown-link-active-color: var(--mp-accent-ink);
+}
+
+.list-group {
+    --bs-list-group-bg: var(--mp-surface);
+    --bs-list-group-border-color: var(--mp-line);
+    --bs-list-group-color: var(--mp-ink);
+}
+
+/* Shared helpers */
+.num {
+    font-family: var(--mp-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.text-like {
+    color: var(--mp-like) !important;
+}
+
+.text-dislike {
+    color: var(--mp-dislike) !important;
+}
+
+.text-dim {
+    color: var(--mp-dim) !important;
+}
+
+.min-w-0 {
+    min-width: 0;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+    margin: 0;
+}
+
+.page-narrow {
+    max-width: 760px;
+    margin: 0 auto;
+}
+
+/* Recipe pages go two-column on desktop, so they get more room. */
+@media (min-width: 992px) {
+    .page-wide-lg {
+        max-width: 1080px;
+    }
+}
+
+.page-title {
+    font-family: var(--mp-font-mono);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    text-transform: uppercase;
+    margin: 0;
+}
+
+.page-subtitle {
+    margin: 4px 0 0 0;
+    font-size: 13px;
+    color: var(--mp-muted);
+}
+
+.icon-button {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--mp-line);
+    background: var(--mp-surface);
+    color: var(--mp-ink);
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    text-decoration: none;
+}
+
+.icon-button:hover {
+    color: var(--mp-ink);
+    border-color: var(--mp-dim);
+}
+
+.icon-button[aria-pressed="true"] {
+    color: var(--mp-accent);
+    border-color: var(--mp-accent);
+    background: var(--mp-accent-soft);
+}
+
+/* Summary strip: three stats side by side with dividers. */
+.stat-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border: 1px solid var(--mp-line);
+    border-radius: 8px;
+    background: var(--mp-surface);
+}
+
+.stat-strip > div {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.stat-strip > div + div {
+    border-left: 1px solid var(--mp-line);
+}
+
+.stat-label {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+}
+
+.stat-value {
+    font-family: var(--mp-font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------
+   App shell: header, desktop nav, phone tab bar, "More" sheet
+   ------------------------------------------------------------------ */
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    background: var(--mp-bg);
+    border-bottom: 1px solid var(--mp-line-soft);
+}
+
+.app-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mp-font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    color: var(--mp-muted);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.app-brand svg {
+    color: var(--mp-accent);
+}
+
+.app-brand:hover {
+    color: var(--mp-ink);
+}
+
+.app-nav {
+    display: flex;
+    gap: 2px;
+    margin-left: 12px;
+}
+
+.app-nav a {
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: var(--mp-muted);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.app-nav a:hover {
+    color: var(--mp-ink);
+    background: var(--mp-surface);
+}
+
+.app-nav a[aria-current="page"] {
+    color: var(--mp-accent);
+    background: var(--mp-accent-soft);
+}
+
+.app-header-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-main {
+    padding-top: 16px;
+    padding-bottom: 32px;
+}
+
+.tab-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1030;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom)) 4px;
+    background: var(--mp-surface-2);
+    border-top: 1px solid var(--mp-line);
+}
+
+.tab-bar a,
+.tab-bar button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 52px;
+    border: 0;
+    background: transparent;
+    text-decoration: none;
+    color: var(--mp-muted);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.tab-bar [aria-current="page"] {
+    color: var(--mp-accent);
+    font-weight: 600;
+}
+
+@media (max-width: 991.98px) {
+    body {
+        padding-bottom: calc(var(--mp-tab-bar-height) + env(safe-area-inset-bottom));
+    }
+}
+
+/* Bottom sheets: full width on phones, a centred panel on wider screens. */
+.app-sheet {
+    border-radius: 16px 16px 0 0;
+    height: auto !important;
+    max-height: 92dvh;
+}
+
+.app-sheet .offcanvas-body {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 768px) {
+    .app-sheet {
+        left: calc(50% - 260px) !important;
+        right: auto !important;
+        width: 520px;
+    }
+}
+
+.sheet-handle {
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--mp-line);
+    margin: 10px auto 0 auto;
+}
+
+.sheet-links .list-group-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    background: transparent;
+    border-color: var(--mp-line-soft);
+}
+
+.offcanvas-backdrop.show {
+    opacity: 1;
+    background: var(--mp-scrim);
+}
+
+/* The theme toggle shows the icon for the theme it switches to. */
+.theme-toggle[data-theme="dark"] .theme-icon-dark,
+.theme-toggle[data-theme="light"] .theme-icon-light {
+    display: none;
+}
+
+/* Flash messages */
+.flash {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border: 1px solid var(--mp-line);
+    border-left: 3px solid var(--mp-like);
+    border-radius: 8px;
+    background: var(--mp-surface);
+    font-size: 14px;
+}
+
+.flash-error {
+    border-left-color: var(--mp-dislike);
+}
+
+.flash .btn-close {
+    margin-left: auto;
+    flex: none;
+}
+
+/* A quiet note box (empty states, warnings). */
+.note {
+    padding: 16px;
+    border: 1px dashed var(--mp-line);
+    border-radius: 8px;
+    background: var(--mp-surface-2);
+    color: var(--mp-muted);
+    font-size: 14px;
+}
+
+.note-warn {
+    border-style: solid;
+    border-color: var(--mp-accent);
+    background: var(--mp-accent-soft);
+    color: var(--mp-ink);
+}
+
+/* A titled group of rows. */
+.section {
+    margin-top: 28px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--mp-line);
+}
+
+.section-header h2 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--mp-ink);
+    margin: 0;
+}
+
+/* Detail pages: a back link above a sans title (recipe names can be long). */
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    color: var(--mp-muted);
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.back-link:hover {
+    color: var(--mp-ink);
+}
+
+.detail-title {
+    margin: 4px 0 0 0;
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+/* Small inline facts: "35 MIN · SERVES 4 · THAI" */
+.meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-family: var(--mp-font-mono);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+}
+
+.tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border: 1px solid var(--mp-line);
+    border-radius: 4px;
+    font-family: var(--mp-font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+    vertical-align: 2px;
+    white-space: nowrap;
+}
+
+.tag-accent {
+    border-color: var(--mp-accent);
+    color: var(--mp-accent);
+}
+
+/* A simple name + meta row (recipes, groceries, last cart fill). */
+.list-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 56px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--mp-line-soft);
+    color: var(--mp-ink);
+    text-decoration: none;
+}
+
+a.list-row:hover {
+    background: var(--mp-surface-2);
+    color: var(--mp-ink);
+}
+
+.list-row-name {
+    font-size: 15px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.list-row-meta {
+    font-size: 12px;
+    color: var(--mp-muted);
+}
+
+.list-row.is-archived .list-row-name {
+    color: var(--mp-dim);
+}
+
+/* ------------------------------------------------------------------
+   Week plan: one row per dinner, date in a mono column on the left.
+   ------------------------------------------------------------------ */
+.week-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.week-nav .week-heading {
+    flex: 1;
+    min-width: 0;
+}
+
+.day-row {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    column-gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--mp-line-soft);
+    scroll-margin-top: 16px;
+}
+
+.day-date {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 2px;
+    font-family: var(--mp-font-mono);
+    line-height: 1.1;
+}
+
+.day-date .dow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+}
+
+.day-date .dom {
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.day-row.is-today .day-date .dow,
+.day-row.is-today .day-date .dom {
+    color: var(--mp-accent);
+}
+
+.day-recipe {
+    display: block;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--mp-ink);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.day-recipe:hover {
+    color: var(--mp-accent);
+}
+
+.day-summary {
+    margin: 4px 0 0 0;
+    font-size: 14px;
+    color: var(--mp-muted);
+}
+
+.day-why {
+    margin: 6px 0 0 0;
+    padding-left: 10px;
+    border-left: 2px solid var(--mp-accent-soft);
+    font-size: 13px;
+    font-style: italic;
+    color: var(--mp-dim);
+}
+
+.day-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.day-actions .spacer {
+    flex: 1;
+}
+
+/* Thumbs up / down: a two-segment control. */
+.rate-control {
+    display: inline-flex;
+    border: 1px solid var(--mp-line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--mp-surface);
+}
+
+.rate-control button {
+    min-width: 44px;
+    height: 42px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--mp-muted);
+    font-size: 14px;
+}
+
+.rate-control button + button {
+    border-left: 1px solid var(--mp-line);
+}
+
+.rate-control button:hover {
+    color: var(--mp-ink);
+}
+
+.rate-control button.like[aria-pressed="true"] {
+    color: var(--mp-like);
+    background: var(--mp-like-soft);
+}
+
+.rate-control button.dislike[aria-pressed="true"] {
+    color: var(--mp-dislike);
+    background: var(--mp-dislike-soft);
+}
+
+.votes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--mp-muted);
+}
+
+.votes span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* ------------------------------------------------------------------
+   Recipe detail
+   ------------------------------------------------------------------ */
+.ingredient-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ingredient-list li {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--mp-line-soft);
+    font-size: 15px;
+}
+
+.ingredient-list .qty {
+    font-family: var(--mp-font-mono);
+    font-size: 13px;
+    color: var(--mp-accent);
+    overflow-wrap: anywhere;
+}
+
+.recipe-steps {
+    padding-top: 12px;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.recipe-steps p {
+    margin-bottom: 12px;
+}
+
+@media (min-width: 992px) {
+    .recipe-columns {
+        display: grid;
+        grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+        gap: 40px;
+    }
+}
+
+.comment-list {
+    list-style: none;
+    margin: 12px 0 0 0;
+    padding: 0;
+    font-size: 14px;
+}
+
+.comment-list li {
+    padding: 6px 0;
+    color: var(--mp-muted);
+}
+
+.comment-list strong {
+    color: var(--mp-ink);
+    font-weight: 600;
+}
+
+/* ------------------------------------------------------------------
+   Groceries: tappable check rows and a sticky action bar.
+   ------------------------------------------------------------------ */
+.check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    min-height: 56px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--mp-line-soft);
+    cursor: pointer;
+}
+
+.check-row .form-check-input {
+    width: 22px;
+    height: 22px;
+    margin: 1px 0 0 0;
+    flex: none;
+    cursor: pointer;
+}
+
+.check-row:has(input:not(:checked)) .list-row-name {
+    color: var(--mp-dim);
+    text-decoration: line-through;
+}
+
+.sticky-action {
+    position: sticky;
+    bottom: calc(var(--mp-tab-bar-height) + env(safe-area-inset-bottom));
+    z-index: 10;
+    margin: 16px -16px 0 -16px;
+    padding: 12px 16px;
+    background: var(--mp-bg);
+    border-top: 1px solid var(--mp-line);
+}
+
+@media (min-width: 992px) {
+    .sticky-action {
+        bottom: 0;
+        margin-left: 0;
+        margin-right: 0;
+        padding-left: 0;
+        padding-right: 0;
+    }
+}
+
+/* Admin-style "forbidden" / empty pages */
+.center-card {
+    max-width: 420px;
+    margin: 12vh auto 0 auto;
+    text-align: center;
+}

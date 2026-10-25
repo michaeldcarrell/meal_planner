@@ -12,6 +12,7 @@ urlpatterns = [
     path("plan/<str:week_start>/generate/", views.GeneratePlan.as_view(), name="generate_plan"),
     path("plan/<str:week_start>/email/", views.EmailPlan.as_view(), name="email_plan"),
     path("plan/<str:week_start>/groceries/", views.Groceries.as_view(), name="groceries"),
+    path("groceries/", views.CurrentGroceries.as_view(), name="current_groceries"),
     path("meals/<int:pk>/", views.MealDetail.as_view(), name="meal_detail"),
     path("meals/<int:pk>/replace/", views.ReplaceMeal.as_view(), name="replace_meal"),
     path("meals/<int:pk>/lock/", views.ToggleLock.as_view(), name="toggle_lock"),

@@ -1,6 +1,10 @@
-<form method="post" action="{% url 'rate_recipe' recipe.pk %}" class="d-inline">
+<form method="post" action="{% url 'rate_recipe' recipe.pk %}" class="rate-control" aria-label="Rate {{ recipe.name }}">
     {% csrf_token %}
     <input type="hidden" name="next" value="{{ request.get_full_path }}">
-    <button name="value" value="{% if my_rating == 1 %}0{% else %}1{% endif %}" class="btn btn-sm {% if my_rating == 1 %}btn-success{% else %}btn-outline-success{% endif %}" title="Liked it">👍</button>
-    <button name="value" value="{% if my_rating == -1 %}0{% else %}-1{% endif %}" class="btn btn-sm {% if my_rating == -1 %}btn-danger{% else %}btn-outline-danger{% endif %}" title="Didn't like it">👎</button>
+    <button name="value" value="{% if my_rating == 1 %}0{% else %}1{% endif %}" class="like" aria-pressed="{% if my_rating == 1 %}true{% else %}false{% endif %}" aria-label="Liked it" title="Liked it">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM7 10l4-8a3 3 0 0 1 3 3v4h5.5a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.1 21H7"></path></svg>
+    </button>
+    <button name="value" value="{% if my_rating == -1 %}0{% else %}-1{% endif %}" class="dislike" aria-pressed="{% if my_rating == -1 %}true{% else %}false{% endif %}" aria-label="Didn't like it" title="Didn't like it">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1zM17 14l-4 8a3 3 0 0 1-3-3v-4H4.5a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.9 3H17"></path></svg>
+    </button>
 </form>

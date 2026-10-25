@@ -1,21 +1,30 @@
 {% extends "_layout.html" %}
 {% block title %}Recipes{% endblock %}
 {% block body %}
-<h1 class="h3">Recipes</h1>
-<table class="table table-sm align-middle">
-    <thead><tr><th>Recipe</th><th>Cuisine</th><th>Min</th><th>Score</th><th>Served</th></tr></thead>
-    <tbody>
+<h1 class="page-title">Recipes</h1>
+<p class="page-subtitle">Every dinner the planner has suggested, best-loved first.</p>
+
+{% if recipes %}
+<input id="recipe-filter" type="search" class="form-control mt-3" placeholder="Search recipes or cuisines" aria-label="Search recipes">
+{% endif %}
+
+<section class="section mt-3">
+    <div class="section-header"><h2>All recipes</h2><span class="list-row-meta">Score</span></div>
     {% for r in recipes %}
-    <tr class="{% if r.archived %}text-body-secondary{% endif %}">
-        <td><a href="{% url 'recipe_detail' r.pk %}">{{ r.name }}</a>{% if r.archived %} <span class="badge text-bg-secondary">archived</span>{% endif %}</td>
-        <td>{{ r.cuisine }}</td>
-        <td>{{ r.total_minutes|default:"" }}</td>
-        <td>{% if r.total > 0 %}+{% endif %}{{ r.total|default:0 }}</td>
-        <td>{{ r.times }}×</td>
-    </tr>
+    <a href="{% url 'recipe_detail' r.pk %}" class="list-row{% if r.archived %} is-archived{% endif %}" data-recipe-search="{{ r.name|lower }} {{ r.cuisine|lower }}">
+        <div class="min-w-0">
+            <div class="list-row-name">{{ r.name }}{% if r.archived %} <span class="tag ms-1">Archived</span>{% endif %}</div>
+            <div class="meta mt-1">
+                {% if r.cuisine %}<span>{{ r.cuisine }}</span>{% endif %}
+                {% if r.total_minutes %}<span>{{ r.total_minutes }} min</span>{% endif %}
+                <span>Served {{ r.times }}×</span>
+            </div>
+        </div>
+        <span class="num fw-semibold{% if r.total > 0 %} text-like{% elif r.total < 0 %} text-dislike{% else %} text-dim{% endif %}">{% if r.total > 0 %}+{% endif %}{{ r.total|default:0 }}</span>
+    </a>
     {% empty %}
-    <tr><td colspan="5">No recipes yet — they're saved as plans are generated.</td></tr>
+    <p class="note mt-3">No recipes yet. They're saved as plans are generated.</p>
     {% endfor %}
-    </tbody>
-</table>
+    <p id="recipe-filter-empty" class="note mt-3 hidden">No recipes match.</p>
+</section>
 {% endblock %}

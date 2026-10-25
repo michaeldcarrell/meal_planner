@@ -51,14 +51,21 @@ class PlanView(LoginRequiredMixin, View):
         for meal in meals:
             meal.my_rating = meal.recipe.rating_for(request.user)
             meal.votes = list(meal.recipe.ratings.select_related('user'))
+        favorites = list(Recipe.objects.filter(archived=False).annotate(total=Sum('ratings__value'))
+                         .filter(total__gt=0).order_by('name'))
+        for meal in meals:
+            meal.swap_favorites = [r for r in favorites if r.pk != meal.recipe_id]
+        minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
         return render(request, 'meals/plan.html', {
             'plan': plan,
             'week_start': start,
+            'week_end': start + timedelta(days=6),
+            'today': timezone.localdate(),
             'meals': meals,
+            'avg_minutes': round(sum(minutes) / len(minutes)) if minutes else None,
+            'locked_count': sum(1 for m in meals if m.locked),
             'prev_week': (start - timedelta(days=7)).isoformat(),
             'next_week': (start + timedelta(days=7)).isoformat(),
-            'favorites': Recipe.objects.filter(archived=False).annotate(total=Sum('ratings__value'))
-                .filter(total__gt=0).order_by('name'),
         })
 
 
@@ -198,6 +205,16 @@ class Groceries(LoginRequiredMixin, View):
             logger.exception('push_to_cart failed')
             messages.error(request, f'Could not fill the cart: {e}')
         return redirect('groceries', week_start)
+
+
+class CurrentGroceries(LoginRequiredMixin, View):
+    """The tab bar's Groceries link: this week's list, or the week page if nothing is planned yet."""
+    def get(self, request):
+        start = week_start_for(timezone.localdate())
+        if not MealPlan.objects.filter(week_start=start, meals__isnull=False).exists():
+            messages.error(request, 'Plan this week first; the grocery list comes from its dinners.')
+            return redirect('plan', start.isoformat())
+        return redirect('groceries', start.isoformat())
 
 
 class KrogerConnect(LoginRequiredMixin, View):
