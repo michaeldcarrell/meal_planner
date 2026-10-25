@@ -52,3 +52,14 @@ if (recipeFilter) {
         empty?.classList.toggle('hidden', shown > 0);
     });
 }
+
+// Copy buttons: data-copy="#selector" copies that element's text.
+document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
+    const text = document.querySelector(button.dataset.copy)?.textContent.trim();
+    try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = 'Copied';
+    } catch {
+        window.getSelection().selectAllChildren(document.querySelector(button.dataset.copy));
+    }
+}));

@@ -9,7 +9,7 @@ Django 6 app (Google login via allauth, gated by the `AllowedUser` table) that p
 - `meals/calendar_sync.py` — Google Calendar through a service account. Failures are logged, not raised, so a calendar outage never loses a plan.
 - `meals/kroger.py` — Kroger API: user OAuth tokens are kept in the `KrogerAuth` singleton, product and location search use a client-credentials token, and `PUT /cart/add` fills the cart. Remembered UPCs live in `GroceryProduct`.
 - UI: server-rendered Bootstrap 5 templates styled by `static/global/css/global.css` ("Cast Iron" tokens, `--mp-*`, mirroring Simpli Budget's mobile-first shell: phone tab bar, bottom sheets, mono titles). Dark is the default; the `theme` cookie (set by `static/global/js/global.js`) picks light, read by `meals.context_processors.ui`, which also sets `nav_section`. Use the tokens, not hard-coded colours.
-- `HouseholdSettings` (pk=1) and `KrogerAuth` (pk=1) are singletons, both edited in /admin/.
+- `HouseholdSettings` (pk=1) and `KrogerAuth` (pk=1) are singletons. `/settings/` (any member) connects King Soopers and picks the store (`kroger_location_id` / `_name`, via `kroger.find_locations`), and sets `calendar_id` (checked with `calendar_sync.check_access` before saving, then this week is synced); everything else in `HouseholdSettings` is edited in /admin/. Until Kroger, the store, a calendar and a first plan exist, the week page shows a setup checklist (`views._setup_steps`).
 
 ## Conventions
 

@@ -13,6 +13,11 @@
     <span>King Soopers isn't connected.</span>
     <a class="btn btn-primary" href="{% url 'kroger_connect' %}?next={{ request.path|urlencode }}">Connect account</a>
 </div>
+{% elif not store_set %}
+<div class="note note-warn mt-3 d-flex align-items-center justify-content-between gap-3 flex-wrap">
+    <span>Choose your King Soopers store before filling the cart.</span>
+    <a class="btn btn-primary" href="{% url 'settings' %}#store">Choose store</a>
+</div>
 {% endif %}
 
 <form method="post" class="slow">{% csrf_token %}
@@ -32,7 +37,7 @@
     </section>
     {% if items %}
     <div class="sticky-action">
-        <button type="submit" class="btn btn-primary w-100" {% if not kroger_connected %}disabled{% endif %}>
+        <button type="submit" class="btn btn-primary w-100" {% if not kroger_connected or not store_set %}disabled{% endif %}>
             Add <span id="cart-count" class="num">{{ items|length }}</span> to King Soopers cart
         </button>
     </div>
@@ -51,7 +56,7 @@
         {% if r.status == 'added' %}<span class="tag text-like">Added</span>{% else %}<span class="tag text-dislike">{{ r.status }}</span>{% endif %}
     </div>
     {% endfor %}
-    <p class="small text-body-secondary mt-3">Wrong product? Fix the mapping under Settings → Grocery products.</p>
+    <p class="small text-body-secondary mt-3">Wrong product? Fix the mapping in the admin under Grocery products.</p>
 </section>
 {% endif %}
 {% endblock %}

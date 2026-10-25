@@ -5,10 +5,11 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from meals import planner, services
 from meals.models import (
-    AllowedUser, GroceryProduct, HouseholdSettings, MealPlan, MealSwap, PlannedMeal, Rating, Recipe,
+    AllowedUser, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MealSwap, PlannedMeal, Rating, Recipe,
     week_start_for,
 )
 
@@ -142,6 +143,64 @@ class PlanServiceTests(TestCase):
 
     def test_pages_require_login(self, *_):
         self.assertEqual(self.client.get('/recipes/').status_code, 302)
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_setup_checklist_until_kroger_store_and_plan(self, *_):
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Connect your King Soopers account')
+        KrogerAuth.objects.create(pk=1, access_token='a', refresh_token='r', expires_at=timezone.now())
+        household = HouseholdSettings.load()
+        household.kroger_location_id = '62000123'
+        household.save()
+        self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Connect a Google Calendar')
+        household.calendar_id = 'dinners@group.calendar.google.com'
+        household.save()
+        self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Plan your first week')
+        services.generate_week(SUNDAY)
+        self.assertNotContains(self.client.get(f'/plan/{SUNDAY}/'), 'Get set up')
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_settings_connects_checks_and_syncs_calendar(self, choose, delete_event, sync):
+        self.client.force_login(self.user)
+        services.generate_week()  # this week, so connecting syncs it
+        sync.reset_mock()
+        with mock.patch('meals.calendar_sync.check_access', return_value="The bot can't see that calendar."):
+            self.client.post('/settings/calendar/', {'calendar_id': 'wrong@group.calendar.google.com'})
+        self.assertEqual(HouseholdSettings.load().calendar_id, '')
+        self.assertFalse(sync.called)
+
+        with mock.patch('meals.calendar_sync.check_access', return_value=None) as check:
+            self.client.post('/settings/calendar/', {'calendar_id': ' dinners@group.calendar.google.com '})
+        check.assert_called_once_with('dinners@group.calendar.google.com')
+        self.assertEqual(HouseholdSettings.load().calendar_id, 'dinners@group.calendar.google.com')
+        meals = MealPlan.objects.get(week_start=week_start_for(timezone.localdate())).meals.count()
+        self.assertEqual(sync.call_count, meals)
+
+        sync.reset_mock()
+        self.client.post('/settings/calendar/sync/')
+        self.assertEqual(sync.call_count, meals)
+
+        self.client.post('/settings/calendar/', {'calendar_id': 'dinners@group.calendar.google.com', 'disconnect': '1'})
+        self.assertEqual(HouseholdSettings.load().calendar_id, '')
+
+    @mock.patch('meals.kroger.find_locations', return_value=[{
+        'locationId': '62000123', 'chain': 'KINGSOOPERS', 'name': 'King Soopers - Arapahoe',
+        'address': {'addressLine1': '1 Main St', 'city': 'Centennial'},
+    }])
+    def test_settings_finds_and_chooses_store(self, find_locations, *_):
+        self.client.force_login(self.user)
+        response = self.client.get('/settings/')
+        self.assertContains(response, 'Connect King Soopers')
+        self.assertContains(response, 'an event at 5:30 p.m.')
+        response = self.client.get('/settings/', {'zip': '80112'})
+        self.assertContains(response, 'King Soopers - Arapahoe')
+        find_locations.assert_called_once_with('80112')
+        self.assertContains(self.client.get('/settings/', {'zip': 'abc'}), 'Enter a 5-digit ZIP code.')
+        self.client.post('/settings/store/', {'location_id': '62000123', 'name': 'King Soopers - Arapahoe'})
+        household = HouseholdSettings.load()
+        self.assertEqual((household.kroger_location_id, household.kroger_location_name),
+                         ('62000123', 'King Soopers - Arapahoe'))
+        self.assertEqual(self.client.post('/settings/store/', {'location_id': '../x'}).status_code, 400)
 
 
 class PlannerRequestTests(TestCase):

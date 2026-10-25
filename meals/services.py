@@ -28,13 +28,23 @@ def plan_dates(week_start: date) -> list[date]:
     return [d for d in (week_start + timedelta(days=i) for i in range(7)) if d.weekday() in weekdays]
 
 
-def _sync_calendar(meals):
-    """Calendar trouble shouldn't lose a plan; log it and carry on."""
+def _sync_calendar(meals) -> int:
+    """Calendar trouble shouldn't lose a plan; log it and carry on. Returns how many failed."""
+    failed = 0
     for meal in meals:
         try:
             calendar_sync.sync_meal(meal)
         except Exception:
+            failed += 1
             logger.exception('Calendar sync failed for meal %s', meal.pk)
+    return failed
+
+
+def sync_plan_calendar(plan: MealPlan) -> tuple[int, int]:
+    """Push every meal in `plan` to the calendar (e.g. after it's first set). Returns (synced, failed)."""
+    meals = list(plan.meals.select_related('recipe'))
+    failed = _sync_calendar(meals)
+    return len(meals) - failed, failed
 
 
 def generate_week(week_start: date | None = None, regenerate: bool = False) -> MealPlan:
@@ -118,7 +128,7 @@ def push_to_cart(plan: MealPlan, grocery_items: list[str], user) -> CartPush:
     """Match each grocery item to a King Soopers product (remembered per item) and add them to the cart."""
     location_id = HouseholdSettings.load().kroger_location_id
     if not location_id:
-        raise ValueError('Set the King Soopers store (kroger_location_id) in household settings first.')
+        raise ValueError('Choose your King Soopers store on the Settings page first.')
 
     results, to_add = [], []
     for item in grocery_items:

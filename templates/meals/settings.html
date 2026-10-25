@@ -1,0 +1,114 @@
+{% extends "_layout.html" %}
+{% block title %}Settings{% endblock %}
+{% block body %}
+<h1 class="page-title">Settings</h1>
+<p class="page-subtitle">Shared by everyone in the household.</p>
+
+<section class="section" id="kroger">
+    <div class="section-header">
+        <h2>King Soopers account</h2>
+        {% if kroger_auth %}<span class="tag text-like">Connected</span>{% else %}<span class="tag">Not connected</span>{% endif %}
+    </div>
+    <p class="small text-body-secondary pt-3">
+        The grocery list fills this account's cart for pickup; you still check out in the King Soopers app.
+        It's one account for the whole household, so whoever connects it is whose cart gets filled.
+    </p>
+    {% if kroger_auth %}
+    <dl class="detail-list mb-3">
+        <div><dt>Last refreshed</dt><dd class="num">{{ kroger_auth.updated_at|date:"M j, g:i a" }}</dd></div>
+    </dl>
+    <a class="btn btn-outline-secondary" href="{% url 'kroger_connect' %}?next=/settings/%23kroger">Reconnect or switch account</a>
+    {% else %}
+    <a class="btn btn-primary" href="{% url 'kroger_connect' %}?next=/settings/%23kroger">Connect King Soopers</a>
+    {% endif %}
+</section>
+
+<section class="section" id="store">
+    <div class="section-header">
+        <h2>Store</h2>
+        {% if household.kroger_location_id %}<span class="tag text-like">Set</span>{% else %}<span class="tag">Not set</span>{% endif %}
+    </div>
+    {% if household.kroger_location_id %}
+    <dl class="detail-list mt-3">
+        <div><dt>Current store</dt><dd>{{ household.kroger_location_name|default:household.kroger_location_id }}</dd></div>
+    </dl>
+    {% else %}
+    <p class="small text-body-secondary pt-3 mb-0">Products are matched at this store, so pick the one you pick up from.</p>
+    {% endif %}
+    <form method="get" action="{% url 'settings' %}#store" class="d-flex gap-2 mt-3">
+        <input name="zip" class="form-control" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="ZIP code" value="{{ zip }}" aria-label="ZIP code" required>
+        <button type="submit" class="btn btn-outline-secondary flex-none">{% if household.kroger_location_id %}Change store{% else %}Find stores{% endif %}</button>
+    </form>
+    {% if store_error %}<p class="note note-warn mt-3 mb-0">{{ store_error }}</p>{% endif %}
+    {% for store in stores %}
+    <form method="post" action="{% url 'choose_store' %}" class="list-row">{% csrf_token %}
+        <input type="hidden" name="location_id" value="{{ store.id }}">
+        <input type="hidden" name="name" value="{{ store.name }}{% if store.address %} — {{ store.address }}{% endif %}">
+        <div class="min-w-0">
+            <div class="list-row-name">{{ store.name }}{% if store.chain and store.chain|upper != 'KINGSOOPERS' %} <span class="tag ms-1">{{ store.chain }}</span>{% endif %}</div>
+            <div class="list-row-meta mt-1">{{ store.address }}</div>
+        </div>
+        {% if store.id == household.kroger_location_id %}
+        <span class="tag text-like">Current</span>
+        {% else %}
+        <button type="submit" class="btn btn-outline-secondary flex-none">Choose</button>
+        {% endif %}
+    </form>
+    {% endfor %}
+</section>
+
+<section class="section" id="calendar">
+    <div class="section-header">
+        <h2>Google Calendar</h2>
+        {% if household.calendar_id %}<span class="tag text-like">Connected</span>{% else %}<span class="tag">Not connected</span>{% endif %}
+    </div>
+    <p class="small text-body-secondary pt-3">Each planned dinner becomes an event at {{ household.dinner_time|time:"g:i a" }} with the recipe, ingredients and a link back here.</p>
+    {% if not household.calendar_id %}
+    <ol class="calendar-steps small">
+        <li>In Google Calendar, open the calendar's <strong>Settings and sharing</strong> (or create a new one, like "Dinners").</li>
+        <li>Under <strong>Share with specific people</strong>, add this address with <strong>Make changes to events</strong>:
+            {% if calendar_bot %}
+            <span class="copy-field mt-2">
+                <code id="calendar-bot">{{ calendar_bot }}</code>
+                <button type="button" class="btn btn-outline-secondary btn-sm flex-none" data-copy="#calendar-bot">Copy</button>
+            </span>
+            {% else %}
+            <span class="d-block text-dislike mt-1">The service account key is missing on the server, so the calendar can't be used yet.</span>
+            {% endif %}
+        </li>
+        <li>Copy the <strong>Calendar ID</strong> from <strong>Integrate calendar</strong> and paste it below.</li>
+    </ol>
+    {% endif %}
+    <form method="post" action="{% url 'set_calendar' %}" class="d-grid gap-2 mt-3">{% csrf_token %}
+        <label class="form-label small text-body-secondary mb-0" for="calendar-id">Calendar ID</label>
+        <input id="calendar-id" name="calendar_id" class="form-control" value="{{ household.calendar_id }}" placeholder="…@group.calendar.google.com" autocomplete="off" spellcheck="false" {% if not household.calendar_id %}required{% endif %}>
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="submit" class="btn {% if household.calendar_id %}btn-outline-secondary{% else %}btn-primary{% endif %}">{% if household.calendar_id %}Save{% else %}Connect calendar{% endif %}</button>
+            {% if household.calendar_id %}<button type="submit" name="disconnect" value="1" class="btn btn-quiet text-dislike" formnovalidate>Disconnect</button>{% endif %}
+        </div>
+    </form>
+    {% if household.calendar_id and current_plan %}
+    <form method="post" action="{% url 'sync_calendar' %}" class="slow mt-3">{% csrf_token %}
+        <button type="submit" class="btn btn-outline-secondary">Sync this week's dinners</button>
+        <span class="small text-body-secondary d-block mt-2">New and swapped dinners sync on their own; use this if events are missing.</span>
+    </form>
+    {% endif %}
+</section>
+
+{% if user.is_staff %}
+<section class="section">
+    <div class="section-header"><h2>Planning</h2></div>
+    <p class="small text-body-secondary pt-3">Which nights to plan, servings, time limits, dietary notes, pantry staples and who's allowed in are in the admin.</p>
+    <a class="btn btn-outline-secondary" href="/admin/meals/householdsettings/1/change/">Open household settings</a>
+    <a class="btn btn-quiet" href="/admin/meals/alloweduser/">Manage members</a>
+</section>
+{% endif %}
+
+<section class="section">
+    <div class="section-header"><h2>Account</h2></div>
+    <dl class="detail-list mt-3">
+        <div><dt>Signed in as</dt><dd>{{ user.email|default:user.username }}</dd></div>
+    </dl>
+    <a class="btn btn-outline-secondary text-dislike mt-3" href="{% url 'logout' %}">Log out</a>
+</section>
+{% endblock %}

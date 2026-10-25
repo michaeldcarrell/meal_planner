@@ -34,7 +34,8 @@ class HouseholdSettings(models.Model):
     calendar_id = models.CharField(
         max_length=255, blank=True, help_text='Google Calendar ID, shared with the service account.')
     kroger_location_id = models.CharField(
-        max_length=20, blank=True, help_text='King Soopers store id; find with `manage.py kroger_locations <zip>`.')
+        max_length=20, blank=True, help_text='King Soopers store id; pick it on the Settings page.')
+    kroger_location_name = models.CharField(max_length=200, blank=True, help_text='Shown on the Settings page.')
 
     class Meta:
         verbose_name_plural = 'household settings'
@@ -44,7 +45,9 @@ class HouseholdSettings(models.Model):
 
     @classmethod
     def load(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+        obj, created = cls.objects.get_or_create(pk=1)
+        if created:
+            obj.refresh_from_db()  # field defaults like dinner_time='17:30' come back as real types
         return obj
 
     @property

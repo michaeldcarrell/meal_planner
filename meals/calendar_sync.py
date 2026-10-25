@@ -1,4 +1,5 @@
 """Mirror PlannedMeals onto a shared Google Calendar via a service account."""
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -13,6 +14,28 @@ from meals.models import HouseholdSettings, PlannedMeal
 logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.events']
+
+
+def service_account_email() -> str:
+    """The address a calendar has to be shared with, or '' when the key file is missing."""
+    try:
+        with open(settings.GOOGLE_SERVICE_ACCOUNT_FILE) as f:
+            return json.load(f).get('client_email', '')
+    except (OSError, ValueError):
+        return ''
+
+
+def check_access(calendar_id: str) -> str | None:
+    """None when the service account can read events on `calendar_id`, else why it can't."""
+    try:
+        _service().events().list(calendarId=calendar_id, maxResults=1).execute()
+    except HttpError as e:
+        if e.resp.status in (403, 404):
+            return "The bot can't see that calendar. Check the ID, and that it's shared with the bot."
+        return f'Google Calendar returned an error ({e.resp.status}).'
+    except OSError:
+        return 'The service account key file is missing on the server.'
+    return None
 
 
 def _service():

@@ -16,8 +16,8 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from meals import kroger, services
-from meals.models import MealPlan, PlannedMeal, Rating, Recipe, week_start_for
+from meals import calendar_sync, kroger, services
+from meals.models import HouseholdSettings, KrogerAuth, MealPlan, PlannedMeal, Rating, Recipe, week_start_for
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,22 @@ class Logout(View):
         return redirect('/')
 
 
+def _setup_steps() -> list[dict] | None:
+    """First-run checklist for the week page, or None once everything is done."""
+    household = HouseholdSettings.load()
+    steps = [
+        {'label': 'Connect your King Soopers account', 'done': kroger.is_connected(),
+         'hint': 'So the grocery list can fill your cart.', 'url': '/settings/#kroger'},
+        {'label': 'Choose your King Soopers store', 'done': bool(household.kroger_location_id),
+         'hint': 'Products and prices come from this store.', 'url': '/settings/#store'},
+        {'label': 'Connect a Google Calendar', 'done': bool(household.calendar_id),
+         'hint': 'Each dinner shows up as an event with the recipe.', 'url': '/settings/#calendar'},
+        {'label': 'Plan your first week', 'done': MealPlan.objects.filter(meals__isnull=False).exists(),
+         'hint': 'Dinners go on the calendar and the grocery list is built from them.', 'url': None},
+    ]
+    return None if all(step['done'] for step in steps) else steps
+
+
 class PlanView(LoginRequiredMixin, View):
     def get(self, request, week_start):
         try:
@@ -57,6 +73,7 @@ class PlanView(LoginRequiredMixin, View):
             meal.swap_favorites = [r for r in favorites if r.pk != meal.recipe_id]
         minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
         return render(request, 'meals/plan.html', {
+            'setup_steps': _setup_steps(),
             'plan': plan,
             'week_start': start,
             'week_end': start + timedelta(days=6),
@@ -186,6 +203,7 @@ class Groceries(LoginRequiredMixin, View):
             'plan': plan,
             'items': services.grocery_list(plan),
             'kroger_connected': kroger.is_connected(),
+            'store_set': bool(HouseholdSettings.load().kroger_location_id),
             'last_push': plan.cart_pushes.order_by('-created_at').first(),
         })
 
@@ -217,11 +235,100 @@ class CurrentGroceries(LoginRequiredMixin, View):
         return redirect('groceries', start.isoformat())
 
 
+class SettingsView(LoginRequiredMixin, View):
+    """King Soopers connection and store, reachable before any plan exists."""
+    def get(self, request):
+        household = HouseholdSettings.load()
+        zip_code = request.GET.get('zip', '').strip()
+        stores, store_error = [], ''
+        if zip_code:
+            if not (zip_code.isdigit() and len(zip_code) == 5):
+                store_error = 'Enter a 5-digit ZIP code.'
+            else:
+                try:
+                    stores = [_store_summary(loc) for loc in kroger.find_locations(zip_code)]
+                except Exception as e:
+                    logger.exception('Kroger location search failed')
+                    store_error = f'Could not search stores: {e}'
+                if not stores and not store_error:
+                    store_error = f'No stores found near {zip_code}.'
+        return render(request, 'meals/settings.html', {
+            'household': household,
+            'kroger_auth': KrogerAuth.objects.filter(pk=1).first(),
+            'calendar_bot': calendar_sync.service_account_email(),
+            'current_plan': MealPlan.objects.filter(week_start=week_start_for(timezone.localdate()),
+                                                    meals__isnull=False).first(),
+            'zip': zip_code,
+            'stores': stores,
+            'store_error': store_error,
+        })
+
+
+def _store_summary(loc: dict) -> dict:
+    address = loc.get('address', {})
+    return {
+        'id': loc['locationId'],
+        'name': loc.get('name', ''),
+        'chain': loc.get('chain', ''),
+        'address': ', '.join(p for p in (address.get('addressLine1'), address.get('city')) if p),
+    }
+
+
+class ChooseStore(LoginRequiredMixin, View):
+    def post(self, request):
+        location_id = request.POST.get('location_id', '').strip()
+        if not (location_id.isalnum() and len(location_id) <= 20):
+            return HttpResponseBadRequest()
+        household = HouseholdSettings.load()
+        household.kroger_location_id = location_id
+        household.kroger_location_name = request.POST.get('name', '').strip()[:200]
+        household.save(update_fields=['kroger_location_id', 'kroger_location_name'])
+        messages.success(request, f"Store set to {household.kroger_location_name or location_id}.")
+        return redirect('/settings/#store')
+
+
+class SetCalendar(LoginRequiredMixin, View):
+    def post(self, request):
+        household = HouseholdSettings.load()
+        calendar_id = '' if request.POST.get('disconnect') else request.POST.get('calendar_id', '').strip()
+        if calendar_id:
+            if len(calendar_id) > 255:
+                return HttpResponseBadRequest()
+            problem = calendar_sync.check_access(calendar_id)
+            if problem:
+                messages.error(request, problem)
+                return redirect('/settings/#calendar')
+        household.calendar_id = calendar_id
+        household.save(update_fields=['calendar_id'])
+        if not calendar_id:
+            messages.success(request, 'Calendar disconnected. Dinners will no longer be added.')
+            return redirect('/settings/#calendar')
+        plan = MealPlan.objects.filter(week_start=week_start_for(timezone.localdate())).first()
+        synced, failed = services.sync_plan_calendar(plan) if plan else (0, 0)
+        messages.success(request, 'Calendar connected.' + (f' Added {synced} dinners from this week.' if synced else ''))
+        if failed:
+            messages.error(request, f'{failed} dinners could not be added; see the server log.')
+        return redirect('/settings/#calendar')
+
+
+class SyncCalendar(LoginRequiredMixin, View):
+    def post(self, request):
+        plan = MealPlan.objects.filter(week_start=week_start_for(timezone.localdate())).first()
+        if not plan or not HouseholdSettings.load().calendar_id:
+            return redirect('/settings/#calendar')
+        synced, failed = services.sync_plan_calendar(plan)
+        if failed:
+            messages.error(request, f'Synced {synced} dinners; {failed} failed. See the server log.')
+        else:
+            messages.success(request, f"Synced {synced} dinners to the calendar.")
+        return redirect('/settings/#calendar')
+
+
 class KrogerConnect(LoginRequiredMixin, View):
     def get(self, request):
         state = secrets.token_urlsafe(24)
         request.session['kroger_state'] = state
-        request.session['kroger_next'] = request.GET.get('next', '/')
+        request.session['kroger_next'] = request.GET.get('next', '/settings/')
         return redirect(kroger.authorize_url(state))
 
 

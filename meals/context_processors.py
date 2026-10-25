@@ -3,6 +3,7 @@ NAV_SECTIONS = {
     'index': 'week', 'plan': 'week', 'meal_detail': 'week',
     'groceries': 'groceries', 'current_groceries': 'groceries',
     'recipes': 'recipes', 'recipe_detail': 'recipes',
+    'settings': 'settings',
 }
 
 

@@ -14,6 +14,23 @@
     </a>
 </div>
 
+{% if setup_steps %}
+<section class="setup-card mt-3" aria-labelledby="setup-title">
+    <p class="eyebrow" id="setup-title">Get set up</p>
+    <ol class="setup-steps">
+        {% for step in setup_steps %}
+        <li class="{% if step.done %}is-done{% endif %}">
+            <span class="setup-check" aria-hidden="true">{% if step.done %}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"></path></svg>{% else %}{{ forloop.counter }}{% endif %}</span>
+            <span class="min-w-0 flex-grow-1">
+                {% if step.url and not step.done %}<a href="{{ step.url }}">{{ step.label }}</a>{% else %}{{ step.label }}{% endif %}
+                {% if step.done %}<span class="visually-hidden">(done)</span>{% else %}<span class="list-row-meta d-block">{{ step.hint }}</span>{% endif %}
+            </span>
+        </li>
+        {% endfor %}
+    </ol>
+</section>
+{% endif %}
+
 {% if not plan or not meals %}
 <div class="note text-center mt-4">
     <p class="mb-3">No dinners planned for this week yet.</p>

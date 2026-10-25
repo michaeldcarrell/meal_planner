@@ -874,3 +874,126 @@ a.list-row:hover {
     margin: 12vh auto 0 auto;
     text-align: center;
 }
+
+/* Label/value pairs (settings). */
+.detail-list {
+    margin: 0;
+    border-top: 1px solid var(--mp-line-soft);
+}
+
+.detail-list > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--mp-line-soft);
+}
+
+.detail-list dt {
+    font-weight: 400;
+    color: var(--mp-muted);
+    font-size: 14px;
+}
+
+.detail-list dd {
+    margin: 0;
+    text-align: right;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.flex-none {
+    flex: none;
+}
+
+/* First-run checklist on the week page. */
+.setup-card {
+    padding: 16px;
+    border: 1px solid var(--mp-accent);
+    border-radius: 8px;
+    background: var(--mp-accent-soft);
+}
+
+.setup-steps {
+    list-style: none;
+    margin: 8px 0 0 0;
+    padding: 0;
+}
+
+.setup-steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    font-size: 15px;
+    font-weight: 500;
+}
+
+.setup-steps li + li {
+    border-top: 1px solid var(--mp-line);
+}
+
+.setup-steps a {
+    color: var(--mp-ink);
+    text-decoration-color: var(--mp-accent);
+    text-underline-offset: 3px;
+}
+
+.setup-check {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--mp-accent);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    font-family: var(--mp-font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--mp-accent);
+}
+
+.setup-steps li.is-done {
+    color: var(--mp-muted);
+    font-weight: 400;
+}
+
+.setup-steps li.is-done .setup-check {
+    background: var(--mp-accent);
+    color: var(--mp-accent-ink);
+}
+
+/* Calendar setup steps and a copyable value. */
+.calendar-steps {
+    margin: 0;
+    padding-left: 20px;
+    color: var(--mp-muted);
+}
+
+.calendar-steps li {
+    padding: 4px 0;
+}
+
+.calendar-steps strong {
+    color: var(--mp-ink);
+    font-weight: 600;
+}
+
+.copy-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px 6px 10px;
+    border: 1px solid var(--mp-line);
+    border-radius: 8px;
+    background: var(--mp-surface);
+}
+
+.copy-field code {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    color: var(--mp-ink);
+}
