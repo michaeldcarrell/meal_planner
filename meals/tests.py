@@ -25,7 +25,7 @@ def new_recipe(name, items=('yellow onion',)):
     )
 
 
-def fake_choose_week(slots, locked):
+def fake_choose_week(slots, locked, hint=''):
     return [
         planner.MealChoice(date=d.isoformat(), meal_type=t, existing_recipe_id=None,
                            new_recipe=new_recipe(f'Dish {d:%a}' if t == 'dinner' else f'{t.title()} {d:%a}'), why='variety')
@@ -85,6 +85,61 @@ class PlanServiceTests(TestCase):
         services.generate_week(SUNDAY)
         self.assertEqual(choose.call_args.args[0][3], (date(2026, 10, 27), 'lunch'))
         self.assertEqual(plan.meals.filter(meal_type='lunch').count(), 2)
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_removed_meal_stays_removed_for_that_week(self, choose, delete_event, sync):
+        plan = services.generate_week(SUNDAY)
+        tuesday = plan.meals.get(date=date(2026, 10, 27))
+        services.remove_meal(tuesday)
+        delete_event.assert_called_once()
+        self.assertEqual(plan.meals.count(), 4)
+        services.generate_week(SUNDAY)
+        services.generate_week(SUNDAY, regenerate=True)
+        self.assertFalse(plan.meals.filter(date=date(2026, 10, 27)).exists())
+        self.assertNotIn((date(2026, 10, 27), 'dinner'), choose.call_args.args[0])
+        # Next week still follows the schedule.
+        self.assertEqual(services.generate_week(date(2026, 11, 1)).meals.count(), 5)
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_added_meal_is_planned_and_kept_on_regenerate(self, choose, delete_event, sync):
+        plan = services.generate_week(SUNDAY)
+        saturday = date(2026, 10, 31)
+        meal = services.add_meal(plan, saturday, 'lunch', self.user, hint='something light')
+        self.assertEqual((meal.recipe.name, meal.meal_type), ('Lunch Sat', 'lunch'))
+        self.assertEqual(choose.call_args.args[0], [(saturday, 'lunch')])
+        self.assertEqual(choose.call_args.kwargs['hint'], 'something light')
+        self.assertEqual(len(choose.call_args.args[1]), 5)  # the rest of the week, so it isn't duplicated
+        sync.assert_called_with(meal)
+        services.generate_week(SUNDAY, regenerate=True)
+        self.assertTrue(plan.meals.filter(date=saturday, meal_type='lunch').exists())
+        with self.assertRaises(ValueError):
+            services.add_meal(plan, saturday, 'lunch', self.user)
+        with self.assertRaises(ValueError):
+            services.add_meal(plan, date(2026, 11, 1), 'dinner', self.user)
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_add_and_remove_from_the_week_page(self, choose, delete_event, sync):
+        plan = services.generate_week(SUNDAY)
+        favorite = Recipe.objects.create(name='Pancakes')
+        Rating.objects.create(recipe=favorite, user=self.user, value=1)
+        self.client.force_login(self.user)
+        page = self.client.get(f'/plan/{SUNDAY}/')
+        self.assertContains(page, 'Add a meal to this week')
+        self.assertContains(page, 'Remove from this week')
+        response = self.client.post(f'/plan/{SUNDAY}/add/', {
+            'date': '2026-10-25', 'meal_type': 'breakfast', 'recipe_id': favorite.pk})
+        meal = plan.meals.get(meal_type='breakfast')
+        self.assertRedirects(response, f'/plan/{SUNDAY}/#meal-{meal.pk}', fetch_redirect_response=False)
+        self.assertEqual(meal.recipe, favorite)
+        self.assertEqual(choose.call_count, 1)  # a favorite needs no Claude call
+        self.assertEqual(self.client.post(f'/plan/{SUNDAY}/add/', {'date': 'x', 'meal_type': 'lunch'}).status_code, 400)
+        self.assertEqual(self.client.post(f'/plan/{SUNDAY}/add/', {'date': '2026-10-25', 'meal_type': 'brunch'}).status_code, 400)
+
+        response = self.client.post(f'/meals/{meal.pk}/remove/')
+        self.assertRedirects(response, f'/plan/{SUNDAY}/', fetch_redirect_response=False)
+        self.assertFalse(plan.meals.filter(meal_type='breakfast').exists())
+        plan.refresh_from_db()
+        self.assertEqual(plan.slot_overrides, {'2026-10-25:breakfast': False})
 
     def test_resolve_recipe_reuses_known_recipe(self, *_):
         known = Recipe.objects.create(name='Tacos')

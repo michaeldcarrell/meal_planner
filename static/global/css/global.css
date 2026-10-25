@@ -120,6 +120,17 @@ body {
     --bs-btn-active-border-color: var(--mp-dim);
 }
 
+.btn-outline-danger {
+    --bs-btn-color: var(--mp-dislike);
+    --bs-btn-border-color: var(--mp-line);
+    --bs-btn-hover-color: var(--mp-dislike);
+    --bs-btn-hover-bg: var(--mp-dislike-soft);
+    --bs-btn-hover-border-color: var(--mp-dislike);
+    --bs-btn-active-color: var(--mp-dislike);
+    --bs-btn-active-bg: var(--mp-dislike-soft);
+    --bs-btn-active-border-color: var(--mp-dislike);
+}
+
 .btn-quiet {
     --bs-btn-color: var(--mp-muted);
     --bs-btn-hover-color: var(--mp-ink);

@@ -37,6 +37,7 @@
     <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow">{% csrf_token %}
         <button type="submit" class="btn btn-primary px-4">Plan this week</button>
     </form>
+    {% if plan %}<button type="button" class="btn btn-quiet mt-2" data-bs-toggle="offcanvas" data-bs-target="#add-sheet" aria-controls="add-sheet">Or add one meal</button>{% endif %}
 </div>
 {% else %}
 <div class="stat-strip mt-3">
@@ -96,6 +97,10 @@
         </div>
     </article>
     {% endfor %}
+    <button type="button" class="btn btn-outline-secondary w-100 mt-3" data-bs-toggle="offcanvas" data-bs-target="#add-sheet" aria-controls="add-sheet">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        Add a meal
+    </button>
 </section>
 
 {% for meal in meals %}
@@ -118,6 +123,43 @@
             <button type="submit" class="btn btn-outline-secondary">Regenerate unlocked meals</button>
         </form>
         <p class="small text-body-secondary mb-0">Locked meals stay put when you regenerate.</p>
+    </div>
+</div>
+{% endif %}
+
+{% if plan %}
+<div class="offcanvas offcanvas-bottom app-sheet" tabindex="-1" id="add-sheet" aria-labelledby="add-sheet-label">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="offcanvas-header pb-2">
+        <h2 class="offcanvas-title eyebrow" id="add-sheet-label">Add a meal to this week</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body pt-0">
+        <form method="post" action="{% url 'add_meal' week_start|date:'Y-m-d' %}" class="slow d-grid gap-2">{% csrf_token %}
+            <label class="form-label small text-body-secondary mb-0" for="add-date">Day</label>
+            <select id="add-date" name="date" class="form-select">
+                {% for day in plan.days %}<option value="{{ day|date:'Y-m-d' }}" {% if day == today %}selected{% endif %}>{{ day|date:"l, M j" }}</option>{% endfor %}
+            </select>
+            <fieldset class="mt-2">
+                <legend class="form-label small text-body-secondary mb-1">Meal</legend>
+                <div class="segmented">
+                    {% for key, label in meal_types %}
+                    <label><input type="radio" name="meal_type" value="{{ key }}" {% if key == 'dinner' %}checked{% endif %}><span>{{ label }}</span></label>
+                    {% endfor %}
+                </div>
+            </fieldset>
+            {% if favorites %}
+            <label class="form-label small text-body-secondary mb-0 mt-2" for="add-recipe">What to make</label>
+            <select id="add-recipe" name="recipe_id" class="form-select">
+                <option value="">Let the planner suggest something</option>
+                {% for r in favorites %}<option value="{{ r.pk }}">{{ r.name }} (+{{ r.total }})</option>{% endfor %}
+            </select>
+            {% endif %}
+            <label class="form-label small text-body-secondary mb-0 mt-2" for="add-hint">Anything in mind? (optional, for suggestions)</label>
+            <input id="add-hint" name="hint" class="form-control" maxlength="300" placeholder="e.g. something light, uses up the chicken">
+            <button type="submit" class="btn btn-primary mt-2">Add meal</button>
+        </form>
+        <p class="small text-body-secondary mt-3 mb-0">Only changes this week; your usual meals are set in Preferences.</p>
     </div>
 </div>
 {% endif %}

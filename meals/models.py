@@ -199,6 +199,9 @@ class MealPlan(models.Model):
     week_start = models.DateField(unique=True, help_text='The Sunday this plan starts on.')
     created_at = models.DateTimeField(auto_now_add=True)
     emailed_at = models.DateTimeField(null=True, blank=True)
+    # This week's changes to the household schedule: {"2026-10-26:dinner": false, "2026-10-31:lunch": true}.
+    # False is a meal someone removed (never re-planned), true one they added beyond the schedule.
+    slot_overrides = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ['-week_start']
@@ -209,6 +212,14 @@ class MealPlan(models.Model):
     @property
     def week_end(self) -> date:
         return self.week_start + timedelta(days=6)
+
+    @property
+    def days(self) -> list[date]:
+        return [self.week_start + timedelta(days=i) for i in range(7)]
+
+    @staticmethod
+    def slot_key(day: date, meal_type: str) -> str:
+        return f'{day.isoformat()}:{meal_type}'
 
     @classmethod
     def current(cls):

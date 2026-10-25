@@ -84,6 +84,8 @@ class PlanView(LoginRequiredMixin, View):
             'week_end': start + timedelta(days=6),
             'today': timezone.localdate(),
             'meals': meals,
+            'favorites': favorites,
+            'meal_types': MEAL_TYPES,
             'meals_label': services.meals_label(meals),
             # Name each meal's type once the week has more than dinners in it.
             'show_meal_types': any(m.meal_type != 'dinner' for m in meals),
@@ -167,6 +169,39 @@ class ReplaceMeal(LoginRequiredMixin, View):
             logger.exception('replace failed for meal %s', pk)
             messages.error(request, f'Could not replace {old_name}: {e}')
         return _back(request, f'/plan/{meal.plan.week_start.isoformat()}/')
+
+
+class AddMeal(LoginRequiredMixin, View):
+    """Add one meal to this week only, either a favorite or one Claude suggests."""
+    def post(self, request, week_start):
+        plan = _plan_or_404(week_start)
+        meal_type = request.POST.get('meal_type', '')
+        try:
+            day = date.fromisoformat(request.POST.get('date', ''))
+        except ValueError:
+            return HttpResponseBadRequest()
+        if meal_type not in dict(MEAL_TYPES):
+            return HttpResponseBadRequest()
+        recipe_id = request.POST.get('recipe_id')
+        recipe = get_object_or_404(Recipe, pk=recipe_id, archived=False) if recipe_id else None
+        try:
+            meal = services.add_meal(plan, day, meal_type, request.user, recipe=recipe,
+                                     hint=request.POST.get('hint', '').strip()[:300])
+            messages.success(request, f'Added {meal.recipe.name} for {day:%A} {meal.get_meal_type_display().lower()}.')
+            return redirect(f'/plan/{week_start}/#meal-{meal.pk}')
+        except Exception as e:
+            logger.exception('add_meal failed for %s %s', day, meal_type)
+            messages.error(request, f'Could not add that meal: {e}')
+        return redirect('plan', week_start)
+
+
+class RemoveMeal(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        meal = get_object_or_404(PlannedMeal.objects.select_related('plan', 'recipe'), pk=pk)
+        week_start = meal.plan.week_start.isoformat()
+        services.remove_meal(meal)
+        messages.success(request, f'Removed {meal.recipe.name} from {meal.date:%A}. It won\'t be re-planned this week.')
+        return redirect('plan', week_start)
 
 
 class ToggleLock(LoginRequiredMixin, View):

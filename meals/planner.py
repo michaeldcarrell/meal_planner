@@ -184,7 +184,8 @@ def _slot_text(day: date, meal_type: str) -> str:
     return f'{day:%A} {day.isoformat()} {meal_type}'
 
 
-def choose_week(slots: list[tuple[date, str]], locked: dict[tuple[date, str], Recipe]) -> list[MealChoice]:
+def choose_week(slots: list[tuple[date, str]], locked: dict[tuple[date, str], Recipe],
+                hint: str = '') -> list[MealChoice]:
     """Pick a meal for each (date, meal_type) in `slots` that isn't already in `locked`."""
     household = HouseholdSettings.load()
     open_slots = [s for s in slots if s not in locked]
@@ -198,6 +199,9 @@ def choose_week(slots: list[tuple[date, str]], locked: dict[tuple[date, str], Re
         f"Aim for about {household.favorites_per_week} well-liked known recipes this week (fewer if "
         f"there aren't enough), and new recipes for the rest. Return exactly one meal per listed date and meal."
     )
+    if hint:
+        instructions += f"\nWhat the household asked for: {hint}"
+
     choices = _ask(instructions, _household_context(exclude_dates={d for d, _ in slots}))
     by_slot = {(c.date, c.meal_type): c for c in choices.meals}
     missing = [s for s in open_slots if (s[0].isoformat(), s[1]) not in by_slot]

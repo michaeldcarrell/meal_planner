@@ -23,14 +23,22 @@ from meals.models import (
 logger = logging.getLogger(__name__)
 
 
-def plan_slots(week_start: date) -> list[tuple[date, str]]:
-    """The (date, meal_type) pairs the household's schedule asks for, in eating order."""
+def plan_slots(plan: MealPlan) -> list[tuple[date, str]]:
+    """The (date, meal_type) pairs to plan this week, in eating order: the household schedule plus the
+    meals added to this week, minus the ones removed from it."""
     schedule = HouseholdSettings.load().schedule
+    overrides = plan.slot_overrides or {}
     return [
         (day, meal_type)
-        for day in (week_start + timedelta(days=i) for i in range(7))
-        for meal_type, _ in MEAL_TYPES if day.weekday() in schedule[meal_type]
+        for day in plan.days
+        for meal_type, _ in MEAL_TYPES
+        if overrides.get(plan.slot_key(day, meal_type), day.weekday() in schedule[meal_type])
     ]
+
+
+def _set_override(plan: MealPlan, day: date, meal_type: str, planned: bool):
+    plan.slot_overrides = {**(plan.slot_overrides or {}), plan.slot_key(day, meal_type): planned}
+    plan.save(update_fields=['slot_overrides'])
 
 
 def _sync_calendar(meals) -> int:
@@ -56,11 +64,11 @@ def generate_week(week_start: date | None = None, regenerate: bool = False) -> M
     """Create the plan for the week starting `week_start` (a Sunday; default this week).
 
     With `regenerate`, every unlocked meal is re-picked; otherwise only empty meals in the schedule
-    are filled, so calling this twice is harmless.
+    (as changed for this week by `add_meal` / `remove_meal`) are filled, so calling this twice is harmless.
     """
     week_start = week_start_for(week_start or timezone.localdate())
     plan, _ = MealPlan.objects.get_or_create(week_start=week_start)
-    slots = plan_slots(week_start)
+    slots = plan_slots(plan)
 
     if regenerate:
         for meal in plan.meals.filter(locked=False):
@@ -80,6 +88,31 @@ def generate_week(week_start: date | None = None, regenerate: bool = False) -> M
         ]
     _sync_calendar(new_meals)
     return plan
+
+
+def add_meal(plan: MealPlan, day: date, meal_type: str, user, recipe: Recipe | None = None,
+             hint: str = '') -> PlannedMeal:
+    """Add one meal to this week only: `recipe` if given, else one Claude picks (guided by `hint`)."""
+    if day not in plan.days:
+        raise ValueError(f'{day} is not in the week of {plan.week_start}.')
+    if plan.meals.filter(date=day, meal_type=meal_type).exists():
+        raise ValueError(f'There is already a {meal_type} on {day:%A}.')
+    if recipe:
+        why = f'Added by {user.first_name or user.username}'
+    else:
+        locked = {m.slot: m.recipe for m in plan.meals.select_related('recipe')}
+        choice = planner.choose_week([(day, meal_type)], locked, hint=hint)[0]
+        recipe, why = planner.resolve_recipe(choice), choice.why
+    meal = PlannedMeal.objects.create(plan=plan, date=day, meal_type=meal_type, recipe=recipe, why=why[:300])
+    _set_override(plan, day, meal_type, True)
+    _sync_calendar([meal])
+    return meal
+
+
+def remove_meal(meal: PlannedMeal):
+    """Take a meal out of its week; regenerating or re-running the weekly job won't bring it back."""
+    _set_override(meal.plan, meal.date, meal.meal_type, False)
+    _remove_meal(meal)
 
 
 def _remove_meal(meal: PlannedMeal):

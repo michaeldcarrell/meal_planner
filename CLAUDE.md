@@ -4,7 +4,7 @@ Django 6 app (Google login via allauth, gated by the `AllowedUser` table) that p
 
 ## Layout
 
-- `meals/services.py` — the only entry point for plan changes: `generate_week`, `replace_with_suggestion` / `replace_with_recipe`, `grocery_list`, `push_to_cart`, `send_plan_email`. Views, the `generate_meal_plan` command and `/internal/generate-week/` (which Airflow's `meal_plan_weekly` DAG calls) all go through it.
+- `meals/services.py` — the only entry point for plan changes: `generate_week`, `add_meal` / `remove_meal`, `replace_with_suggestion` / `replace_with_recipe`, `grocery_list`, `push_to_cart`, `send_plan_email`. Views, the `generate_meal_plan` command and `/internal/generate-week/` (which Airflow's `meal_plan_weekly` DAG calls) all go through it.
 - `meals/planner.py` — the Claude call. It uses `beta.messages.parse` with Pydantic output models (`WeekChoices`), effort `medium`, and server-side refusal fallbacks. The household context (scored recipes, rating comments, the last 6 weeks of meals, swap reasons, archived recipes) is built in `_household_context`.
 - `meals/calendar_sync.py` — Google Calendar through a service account. Failures are logged, not raised, so a calendar outage never loses a plan. The event time is set only on insert; later syncs `events.patch` just the title, description and link, so times (and guests, reminders, colours) people change in Google Calendar are never overwritten.
 - `meals/kroger.py` — Kroger API: user OAuth tokens are kept in the `KrogerAuth` singleton, product and location search use a client-credentials token, and `PUT /cart/add` fills the cart. Remembered UPCs live in `GroceryProduct`.
@@ -14,7 +14,7 @@ Django 6 app (Google login via allauth, gated by the `AllowedUser` table) that p
 
 ## Conventions
 
-- Weeks run Sunday through Saturday (`week_start_for`). Plans are unique per `week_start`, and meals are unique per (plan, date, `meal_type`); `services.plan_slots` turns the schedule into (date, meal_type) pairs, which is what `planner.choose_week` fills. Each meal type has its own event time (`HouseholdSettings.meal_window`).
+- Weeks run Sunday through Saturday (`week_start_for`). Plans are unique per `week_start`, and meals are unique per (plan, date, `meal_type`); `services.plan_slots` turns the schedule, adjusted by that week's `MealPlan.slot_overrides`, into (date, meal_type) pairs, which is what `planner.choose_week` fills. `services.add_meal` / `remove_meal` change one week only: they record an override (true = added, false = removed) so regenerating or re-running the weekly job keeps the change. Each meal type has its own event time (`HouseholdSettings.meal_window`).
 - `generate_week` is idempotent: it only fills empty slots, unless `regenerate=True`, which re-picks unlocked meals.
 - Tests (`SECRET_KEY=dev python manage.py test meals`) run on SQLite with Claude/Calendar/Kroger mocked. `PlannerRequestTests` goes through the real SDK request/parse path using an httpx2 MockTransport.
 - Production must run on Postgres (`DB_HOST` set). With `DEBUG` off and no `DB_HOST`, settings raise `ImproperlyConfigured` rather than fall back to SQLite, because a SQLite file inside the container is wiped on every redeploy (that wiped `AllowedUser` and every plan twice). Tests and `DEBUG=1` still use SQLite.
