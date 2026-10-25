@@ -16,4 +16,5 @@ Django 6 app (Google login via allauth, gated by the `AllowedUser` table) that p
 - Weeks run Sunday through Saturday (`week_start_for`). Plans are unique per `week_start`, and meals are unique per (plan, date).
 - `generate_week` is idempotent: it only fills empty days, unless `regenerate=True`, which re-picks unlocked meals.
 - Tests (`SECRET_KEY=dev python manage.py test meals`) run on SQLite with Claude/Calendar/Kroger mocked. `PlannerRequestTests` goes through the real SDK request/parse path using an httpx2 MockTransport.
+- Production must run on Postgres (`DB_HOST` set). With `DEBUG` off and no `DB_HOST`, settings raise `ImproperlyConfigured` rather than fall back to SQLite, because a SQLite file inside the container is wiped on every redeploy (that wiped `AllowedUser` and every plan twice). Tests and `DEBUG=1` still use SQLite.
 - Never commit `.env*` or `secrets/`.

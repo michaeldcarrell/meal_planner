@@ -4,7 +4,10 @@ Django settings for meal_planner.
 All secrets and deployment-specific values come from the environment (`.env`,
 loaded by python-decouple). See README.md for the full list of variable names.
 """
+import sys
+
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -98,6 +101,10 @@ if config('DB_HOST', default=''):
             "PORT": config('DB_PORT', default='5432'),
         }
     }
+elif not DEBUG and 'test' not in sys.argv:
+    # SQLite lives inside the container and is wiped on every redeploy, taking the allowed-user
+    # list, recipes and ratings with it. Refuse to start rather than run on it in production.
+    raise ImproperlyConfigured('DB_HOST is not set. Add the DB_* variables to the Portainer stack (see README).')
 else:
     DATABASES = {
         "default": {
