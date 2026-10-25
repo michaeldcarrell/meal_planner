@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from meals import planner, services
 from meals.models import (
-    AllowedUser, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MealSwap, PlannedMeal, Rating, Recipe,
+    AllowedUser, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, MealSwap, PlannedMeal, Rating, Recipe,
     week_start_for,
 )
 
@@ -147,6 +147,8 @@ class PlanServiceTests(TestCase):
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_setup_checklist_until_kroger_store_and_plan(self, *_):
         self.client.force_login(self.user)
+        self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Tell the planner what you like')
+        self.client.post('/preferences/', {'max_minutes': '20'})
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Connect your King Soopers account')
         KrogerAuth.objects.create(pk=1, access_token='a', refresh_token='r', expires_at=timezone.now())
         household = HouseholdSettings.load()
@@ -158,6 +160,35 @@ class PlanServiceTests(TestCase):
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Plan your first week')
         services.generate_week(SUNDAY)
         self.assertNotContains(self.client.get(f'/plan/{SUNDAY}/'), 'Get set up')
+
+    def test_preferences_save_and_reach_the_planner(self, *_):
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get('/preferences/').status_code, 200)
+        self.client.post('/preferences/', {
+            'max_minutes': '20', 'protein_chicken': 'more', 'protein_pork': 'never', 'protein_beef': 'some',
+            'protein_fish': 'bogus', 'cuisine': ['Mexican', 'Thai', 'Martian'], 'style': ['Spicy'],
+            'notes': 'Tree nut allergy', 'dislikes': 'broccoli,  olives\nmushrooms', 'loves': 'salmon',
+        })
+        household = HouseholdSettings.load()
+        self.assertEqual(household.max_weeknight_minutes, 20)
+        self.assertEqual(household.protein_preferences, {'chicken': 'more', 'pork': 'never'})
+        self.assertEqual(household.favorite_cuisines, ['Mexican', 'Thai'])
+        self.assertEqual(household.meal_styles, ['Spicy'])
+        self.assertIsNotNone(household.preferences_updated_at)
+        self.assertEqual(MemberPreferences.objects.get(user=self.user).dislike_list, ['broccoli', 'olives', 'mushrooms'])
+
+        context = json.loads(planner._household_context())
+        self.assertEqual(context['household_notes'], 'Tree nut allergy')
+        prefs = context['preferences']
+        self.assertEqual(prefs['cooking_time'], 'Quick (10–20 min)')
+        self.assertEqual((prefs['proteins_more_often'], prefs['proteins_never']), (['Chicken'], ['Pork']))
+        self.assertEqual(prefs['members'], [{'name': 'mike', 'loves': ['salmon'],
+                                              'dislikes': ['broccoli', 'olives', 'mushrooms']}])
+
+        # Another member sees what this one won't eat.
+        partner = User.objects.create(username='sam', first_name='Sam')
+        self.client.force_login(partner)
+        self.assertContains(self.client.get('/preferences/'), 'broccoli, olives, mushrooms')
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_settings_connects_checks_and_syncs_calendar(self, choose, delete_event, sync):

@@ -4,6 +4,14 @@
 <h1 class="page-title">Settings</h1>
 <p class="page-subtitle">Shared by everyone in the household.</p>
 
+<a href="{% url 'preferences' %}" class="list-row mt-3">
+    <div class="min-w-0">
+        <div class="list-row-name">Food preferences</div>
+        <div class="list-row-meta mt-1">Cooking time, proteins, cuisines, and foods anyone won't eat</div>
+    </div>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+</a>
+
 <section class="section" id="kroger">
     <div class="section-header">
         <h2>King Soopers account</h2>
@@ -98,7 +106,7 @@
 {% if user.is_staff %}
 <section class="section">
     <div class="section-header"><h2>Planning</h2></div>
-    <p class="small text-body-secondary pt-3">Which nights to plan, servings, time limits, dietary notes, pantry staples and who's allowed in are in the admin.</p>
+    <p class="small text-body-secondary pt-3">Which nights to plan, servings, dinner time, pantry staples and who's allowed in are in the admin.</p>
     <a class="btn btn-outline-secondary" href="/admin/meals/householdsettings/1/change/">Open household settings</a>
     <a class="btn btn-quiet" href="/admin/meals/alloweduser/">Manage members</a>
 </section>

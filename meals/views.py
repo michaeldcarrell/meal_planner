@@ -17,7 +17,10 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from meals import calendar_sync, kroger, services
-from meals.models import HouseholdSettings, KrogerAuth, MealPlan, PlannedMeal, Rating, Recipe, week_start_for
+from meals.models import (
+    COOK_TIMES, CUISINES, MEAL_STYLES, PROTEIN_LEVELS, PROTEINS, HouseholdSettings, KrogerAuth, MealPlan,
+    MemberPreferences, PlannedMeal, Rating, Recipe, week_start_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,8 @@ def _setup_steps() -> list[dict] | None:
     """First-run checklist for the week page, or None once everything is done."""
     household = HouseholdSettings.load()
     steps = [
+        {'label': 'Tell the planner what you like', 'done': household.preferences_updated_at is not None,
+         'hint': 'Cooking time, proteins, cuisines, and foods anyone won\'t eat.', 'url': '/preferences/'},
         {'label': 'Connect your King Soopers account', 'done': kroger.is_connected(),
          'hint': 'So the grocery list can fill your cart.', 'url': '/settings/#kroger'},
         {'label': 'Choose your King Soopers store', 'done': bool(household.kroger_location_id),
@@ -233,6 +238,49 @@ class CurrentGroceries(LoginRequiredMixin, View):
             messages.error(request, 'Plan this week first; the grocery list comes from its dinners.')
             return redirect('plan', start.isoformat())
         return redirect('groceries', start.isoformat())
+
+
+class PreferencesView(LoginRequiredMixin, View):
+    """What the household likes (shared) and what each member loves or won't eat (their own)."""
+    def get(self, request):
+        household = HouseholdSettings.load()
+        mine = MemberPreferences.objects.filter(user=request.user).first()
+        proteins = household.protein_preferences or {}
+        return render(request, 'meals/preferences.html', {
+            'household': household,
+            'cook_times': COOK_TIMES,
+            'proteins': [(key, label, proteins.get(key, 'some')) for key, label in PROTEINS],
+            'protein_levels': PROTEIN_LEVELS,
+            'cuisines': CUISINES,
+            'styles': MEAL_STYLES,
+            'mine': mine,
+            'others': MemberPreferences.objects.exclude(user=request.user).select_related('user'),
+        })
+
+    def post(self, request):
+        household = HouseholdSettings.load()
+        try:
+            minutes = int(request.POST.get('max_minutes', ''))
+        except ValueError:
+            minutes = household.max_weeknight_minutes
+        if minutes in {m for m, *_ in COOK_TIMES}:
+            household.max_weeknight_minutes = minutes
+        levels = {key for key, _ in PROTEIN_LEVELS}
+        household.protein_preferences = {
+            key: request.POST.get(f'protein_{key}') for key, _ in PROTEINS
+            if request.POST.get(f'protein_{key}') in levels - {'some'}
+        }
+        household.favorite_cuisines = [c for c in CUISINES if c in request.POST.getlist('cuisine')]
+        household.meal_styles = [m for m in MEAL_STYLES if m in request.POST.getlist('style')]
+        household.dietary_notes = request.POST.get('notes', '').strip()[:2000]
+        household.preferences_updated_at = timezone.now()
+        household.save()
+        MemberPreferences.objects.update_or_create(user=request.user, defaults={
+            'loves': request.POST.get('loves', '').strip()[:1000],
+            'dislikes': request.POST.get('dislikes', '').strip()[:1000],
+        })
+        messages.success(request, 'Preferences saved. The next plan and any swaps will use them.')
+        return redirect('preferences')
 
 
 class SettingsView(LoginRequiredMixin, View):

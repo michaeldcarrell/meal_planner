@@ -1,8 +1,8 @@
 from django.contrib import admin
 
 from meals.models import (
-    AllowedUser, CartPush, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MealSwap, PlannedMeal, Rating,
-    Recipe,
+    AllowedUser, CartPush, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MealSwap, MemberPreferences,
+    PlannedMeal, Rating, Recipe,
 )
 
 
@@ -52,3 +52,4 @@ class GroceryProductAdmin(admin.ModelAdmin):
 admin.site.register(MealSwap)
 admin.site.register(CartPush)
 admin.site.register(KrogerAuth)
+admin.site.register(MemberPreferences)

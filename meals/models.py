@@ -16,6 +16,28 @@ class AllowedUser(models.Model):
         return self.name or self.email
 
 
+# Options on the Preferences page. Keys are stored; labels are shown and sent to the planner.
+COOK_TIMES = [
+    (20, 'Quick', '10–20 min'),
+    (30, 'Easy', 'Up to 30 min'),
+    (45, 'Standard', 'Up to 45 min'),
+    (60, 'Unhurried', 'Up to an hour'),
+]
+PROTEINS = [
+    ('chicken', 'Chicken'), ('beef', 'Beef'), ('pork', 'Pork'), ('turkey', 'Turkey'),
+    ('fish', 'Fish'), ('shellfish', 'Shrimp & shellfish'), ('vegetarian', 'Vegetarian'),
+]
+PROTEIN_LEVELS = [('more', 'More'), ('some', 'Some'), ('never', 'Never')]
+CUISINES = [
+    'American', 'Mexican', 'Italian', 'Mediterranean', 'Greek', 'Middle Eastern', 'Indian', 'Thai',
+    'Chinese', 'Japanese', 'Korean', 'Vietnamese', 'Cajun & Southern', 'BBQ',
+]
+MEAL_STYLES = [
+    'One-pan & sheet-pan', 'Slow cooker & Instant Pot', 'Grilling', 'Kid-friendly', 'Lighter & healthy',
+    'Comfort food', 'Spicy', 'Leftovers for lunch',
+]
+
+
 class HouseholdSettings(models.Model):
     """Singleton (pk=1) of planning knobs, edited in /admin/."""
     # Comma-separated weekday numbers, Monday=0 ... Sunday=6.
@@ -36,6 +58,11 @@ class HouseholdSettings(models.Model):
     kroger_location_id = models.CharField(
         max_length=20, blank=True, help_text='King Soopers store id; pick it on the Settings page.')
     kroger_location_name = models.CharField(max_length=200, blank=True, help_text='Shown on the Settings page.')
+    # Set on the Preferences page.
+    protein_preferences = models.JSONField(default=dict, blank=True, help_text='{"chicken": "more", "pork": "never"}')
+    favorite_cuisines = models.JSONField(default=list, blank=True)
+    meal_styles = models.JSONField(default=list, blank=True)
+    preferences_updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name_plural = 'household settings'
@@ -57,6 +84,32 @@ class HouseholdSettings(models.Model):
     @property
     def pantry_staple_set(self) -> set[str]:
         return {s.strip().lower() for s in self.pantry_staples.split(',') if s.strip()}
+
+
+class MemberPreferences(models.Model):
+    """One household member's own tastes, which the planner applies to the whole household."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name='food_preferences', on_delete=models.CASCADE)
+    loves = models.TextField(blank=True, help_text='Comma-separated foods this person loves.')
+    dislikes = models.TextField(blank=True, help_text="Comma-separated foods this person won't eat.")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'member preferences'
+
+    def __str__(self):
+        return f'{self.user} preferences'
+
+    @staticmethod
+    def split(text: str) -> list[str]:
+        return [item.strip() for item in text.replace('\n', ',').split(',') if item.strip()]
+
+    @property
+    def love_list(self) -> list[str]:
+        return self.split(self.loves)
+
+    @property
+    def dislike_list(self) -> list[str]:
+        return self.split(self.dislikes)
 
 
 class Recipe(models.Model):

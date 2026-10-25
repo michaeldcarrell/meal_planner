@@ -1,0 +1,97 @@
+{% extends "_layout.html" %}
+{% block title %}Preferences{% endblock %}
+{% block body %}
+<h1 class="page-title">Preferences</h1>
+<p class="page-subtitle">The planner uses these for every new plan and swap. Ratings keep teaching it from there.</p>
+
+<form method="post">{% csrf_token %}
+    <p class="eyebrow mt-4">For the household</p>
+
+    <section class="section mt-2">
+        <div class="section-header"><h2>Cooking time</h2></div>
+        <div class="choice-grid pt-3">
+            {% for minutes, label, detail in cook_times %}
+            <label class="choice-card">
+                <input type="radio" name="max_minutes" value="{{ minutes }}" {% if household.max_weeknight_minutes == minutes %}checked{% endif %}>
+                <span><span class="choice-label">{{ label }}</span><span class="choice-detail">{{ detail }}</span></span>
+            </label>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-header"><h2>Proteins</h2><span class="list-row-meta">How often</span></div>
+        {% for key, label, level in proteins %}
+        <fieldset class="pref-row">
+            <legend class="pref-name">{{ label }}</legend>
+            <div class="segmented">
+                {% for value, value_label in protein_levels %}
+                <label class="seg-{{ value }}">
+                    <input type="radio" name="protein_{{ key }}" value="{{ value }}" {% if level == value %}checked{% endif %}>
+                    <span>{{ value_label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        {% endfor %}
+    </section>
+
+    <section class="section">
+        <div class="section-header"><h2>Cuisines you love</h2><span class="list-row-meta">Pick any</span></div>
+        <div class="chips pt-3">
+            {% for cuisine in cuisines %}
+            <label class="chip"><input type="checkbox" name="cuisine" value="{{ cuisine }}" {% if cuisine in household.favorite_cuisines %}checked{% endif %}><span>{{ cuisine }}</span></label>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-header"><h2>Styles</h2><span class="list-row-meta">Pick any</span></div>
+        <div class="chips pt-3">
+            {% for style in styles %}
+            <label class="chip"><input type="checkbox" name="style" value="{{ style }}" {% if style in household.meal_styles %}checked{% endif %}><span>{{ style }}</span></label>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="section-header"><h2>Household notes</h2></div>
+        <label class="form-label small text-body-secondary pt-3" for="notes">Allergies (always avoided), kitchen equipment, anything else the planner should know.</label>
+        <textarea id="notes" name="notes" class="form-control" rows="3" maxlength="2000" placeholder="e.g. Tree nut allergy. We have an Instant Pot and a grill.">{{ household.dietary_notes }}</textarea>
+    </section>
+
+    <p class="eyebrow mt-5">Just you{% if user.first_name %} · {{ user.first_name }}{% endif %}</p>
+
+    <section class="section mt-2">
+        <div class="section-header"><h2>Foods I don't like</h2></div>
+        <label class="form-label small text-body-secondary pt-3" for="dislikes">Separate with commas. Dinners won't be built around these.</label>
+        <textarea id="dislikes" name="dislikes" class="form-control" rows="2" maxlength="1000" placeholder="e.g. broccoli, olives, mushrooms">{{ mine.dislikes }}</textarea>
+    </section>
+
+    <section class="section">
+        <div class="section-header"><h2>Foods I love</h2></div>
+        <label class="form-label small text-body-secondary pt-3" for="loves">Separate with commas. Worked in when they fit.</label>
+        <textarea id="loves" name="loves" class="form-control" rows="2" maxlength="1000" placeholder="e.g. salmon, anything with lime, tacos">{{ mine.loves }}</textarea>
+    </section>
+
+    {% if others %}
+    <section class="section">
+        <div class="section-header"><h2>Everyone else</h2></div>
+        {% for p in others %}
+        <div class="list-row align-items-start">
+            <div class="min-w-0">
+                <div class="list-row-name">{{ p.user.first_name|default:p.user.username }}</div>
+                {% if p.dislike_list %}<div class="list-row-meta mt-1"><span class="text-dislike">Doesn't like</span> {{ p.dislike_list|join:", " }}</div>{% endif %}
+                {% if p.love_list %}<div class="list-row-meta mt-1"><span class="text-like">Loves</span> {{ p.love_list|join:", " }}</div>{% endif %}
+                {% if not p.dislike_list and not p.love_list %}<div class="list-row-meta mt-1">Nothing yet</div>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    <div class="sticky-action">
+        <button type="submit" class="btn btn-primary w-100">Save preferences</button>
+    </div>
+</form>
+{% endblock %}

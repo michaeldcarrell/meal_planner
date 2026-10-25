@@ -9,7 +9,9 @@ from django.db.models import Sum
 from django.utils import timezone
 from pydantic import BaseModel, Field
 
-from meals.models import HouseholdSettings, MealSwap, PlannedMeal, Rating, Recipe
+from meals.models import (
+    COOK_TIMES, PROTEINS, HouseholdSettings, MealSwap, MemberPreferences, PlannedMeal, Rating, Recipe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,11 @@ household already knows (refer to it by its id) or a new recipe you write out in
 
 How to choose:
 - Respect the household notes (allergies and hard dislikes are absolute).
+- Follow the household's preferences: stay within the cooking time (for quick meals, aim for the \
+low end of the range), never use proteins marked "never" and lean on the ones marked "more", and favor \
+the cuisines and styles they love while still mixing in others now and then.
+- Never build a dinner around a food any member dislikes, and leave it out of recipes where it isn't \
+essential. Work in foods members love when it fits.
 - Prefer recipes the household rated well; never pick ones they disliked or archived, and treat \
 recent swaps as "not in the mood for this" signals about the dish and the stated reason.
 - Don't repeat anything eaten in the recent history unless the household loves it and it has been \
@@ -68,6 +75,26 @@ def _client() -> anthropic.Anthropic:
     return anthropic.Anthropic()
 
 
+def _preferences(household: HouseholdSettings) -> dict:
+    labels = dict(PROTEINS)
+    proteins = household.protein_preferences or {}
+    time_label = next(
+        (f'{label} ({detail})' for minutes, label, detail in COOK_TIMES if minutes == household.max_weeknight_minutes),
+        f'Up to {household.max_weeknight_minutes} min')
+    return {
+        'cooking_time': time_label,
+        'proteins_more_often': [labels[k] for k, v in proteins.items() if v == 'more' and k in labels],
+        'proteins_never': [labels[k] for k, v in proteins.items() if v == 'never' and k in labels],
+        'favorite_cuisines': household.favorite_cuisines,
+        'favorite_styles': household.meal_styles,
+        'members': [
+            {'name': p.user.first_name or p.user.username, 'loves': p.love_list, 'dislikes': p.dislike_list}
+            for p in MemberPreferences.objects.select_related('user')
+            if p.love_list or p.dislike_list
+        ],
+    }
+
+
 def _household_context(exclude_dates: set[date] | None = None) -> str:
     """Everything the planner should know, as a compact JSON-ish text block."""
     household = HouseholdSettings.load()
@@ -105,6 +132,7 @@ def _household_context(exclude_dates: set[date] | None = None) -> str:
         'household_notes': household.dietary_notes or '(none)',
         'servings': household.servings,
         'max_weeknight_minutes': household.max_weeknight_minutes,
+        'preferences': _preferences(household),
         'known_recipes': known,
         'rating_comments': comments,
         'recent_history': history,

@@ -20,6 +20,7 @@ urlpatterns = [
     path("recipes/<int:pk>/", views.RecipeDetail.as_view(), name="recipe_detail"),
     path("recipes/<int:pk>/rate/", views.RateRecipe.as_view(), name="rate_recipe"),
     path("recipes/<int:pk>/archive/", views.ToggleArchive.as_view(), name="toggle_archive"),
+    path("preferences/", views.PreferencesView.as_view(), name="preferences"),
     path("settings/", views.SettingsView.as_view(), name="settings"),
     path("settings/store/", views.ChooseStore.as_view(), name="choose_store"),
     path("settings/calendar/", views.SetCalendar.as_view(), name="set_calendar"),

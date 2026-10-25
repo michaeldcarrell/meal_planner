@@ -4,6 +4,7 @@ NAV_SECTIONS = {
     'groceries': 'groceries', 'current_groceries': 'groceries',
     'recipes': 'recipes', 'recipe_detail': 'recipes',
     'settings': 'settings',
+    'preferences': 'preferences',
 }
 
 

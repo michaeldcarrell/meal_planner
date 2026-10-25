@@ -25,6 +25,7 @@
         <a href="/" {% if nav_section == 'week' %}aria-current="page"{% endif %}>This week</a>
         <a href="{% url 'current_groceries' %}" {% if nav_section == 'groceries' %}aria-current="page"{% endif %}>Groceries</a>
         <a href="{% url 'recipes' %}" {% if nav_section == 'recipes' %}aria-current="page"{% endif %}>Recipes</a>
+        <a href="{% url 'preferences' %}" {% if nav_section == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
         <a href="{% url 'settings' %}" {% if nav_section == 'settings' %}aria-current="page"{% endif %}>Settings</a>
     </nav>
     {% endif %}
@@ -73,7 +74,7 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v16H6.5a2.5 2.5 0 0 0 0 5H20"></path><path d="M9 7h7M9 11h5"></path></svg>
         Recipes
     </a>
-    <button type="button" data-bs-toggle="offcanvas" data-bs-target="#more-sheet" aria-controls="more-sheet" {% if nav_section == 'settings' %}aria-current="page"{% endif %}>
+    <button type="button" data-bs-toggle="offcanvas" data-bs-target="#more-sheet" aria-controls="more-sheet" {% if nav_section == 'settings' or nav_section == 'preferences' %}aria-current="page"{% endif %}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
         More
     </button>
@@ -87,6 +88,7 @@
     <div class="offcanvas-body pt-0">
         <p class="small text-body-secondary mb-2">{{ user.email|default:user.username }}</p>
         <div class="list-group list-group-flush sheet-links">
+            <a class="list-group-item list-group-item-action" href="{% url 'preferences' %}">Food preferences</a>
             <a class="list-group-item list-group-item-action" href="{% url 'settings' %}">Settings &amp; King Soopers</a>
             <a class="list-group-item list-group-item-action text-dislike" href="{% url 'logout' %}">Log out</a>
         </div>
