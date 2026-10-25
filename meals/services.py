@@ -16,16 +16,21 @@ from django.utils import timezone
 
 from meals import calendar_sync, kroger, planner
 from meals.models import (
-    AllowedUser, CartPush, GroceryProduct, HouseholdSettings, MealPlan, MealSwap, PlannedMeal, Recipe,
+    MEAL_TYPES, AllowedUser, CartPush, GroceryProduct, HouseholdSettings, MealPlan, MealSwap, PlannedMeal, Recipe,
     week_start_for,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def plan_dates(week_start: date) -> list[date]:
-    weekdays = HouseholdSettings.load().weekdays
-    return [d for d in (week_start + timedelta(days=i) for i in range(7)) if d.weekday() in weekdays]
+def plan_slots(week_start: date) -> list[tuple[date, str]]:
+    """The (date, meal_type) pairs the household's schedule asks for, in eating order."""
+    schedule = HouseholdSettings.load().schedule
+    return [
+        (day, meal_type)
+        for day in (week_start + timedelta(days=i) for i in range(7))
+        for meal_type, _ in MEAL_TYPES if day.weekday() in schedule[meal_type]
+    ]
 
 
 def _sync_calendar(meals) -> int:
@@ -50,26 +55,27 @@ def sync_plan_calendar(plan: MealPlan) -> tuple[int, int]:
 def generate_week(week_start: date | None = None, regenerate: bool = False) -> MealPlan:
     """Create the plan for the week starting `week_start` (a Sunday; default this week).
 
-    With `regenerate`, every unlocked meal is re-picked; otherwise only empty days are filled,
-    so calling this twice is harmless.
+    With `regenerate`, every unlocked meal is re-picked; otherwise only empty meals in the schedule
+    are filled, so calling this twice is harmless.
     """
     week_start = week_start_for(week_start or timezone.localdate())
     plan, _ = MealPlan.objects.get_or_create(week_start=week_start)
-    dates = plan_dates(week_start)
+    slots = plan_slots(week_start)
 
     if regenerate:
         for meal in plan.meals.filter(locked=False):
             _remove_meal(meal)
-    existing = {m.date: m for m in plan.meals.select_related('recipe')}
-    locked = {d: m.recipe for d, m in existing.items()}
-    if all(d in existing for d in dates):
+    existing = {m.slot: m for m in plan.meals.select_related('recipe')}
+    locked = {slot: m.recipe for slot, m in existing.items()}
+    if all(slot in existing for slot in slots):
         return plan
 
-    choices = planner.choose_week(dates, locked)
+    choices = planner.choose_week(slots, locked)
     with transaction.atomic():
         new_meals = [
             PlannedMeal.objects.create(
-                plan=plan, date=date.fromisoformat(c.date), recipe=planner.resolve_recipe(c), why=c.why[:300])
+                plan=plan, date=date.fromisoformat(c.date), meal_type=c.meal_type, recipe=planner.resolve_recipe(c),
+                why=c.why[:300])
             for c in choices
         ]
     _sync_calendar(new_meals)
@@ -94,7 +100,7 @@ def _swap(meal: PlannedMeal, recipe: Recipe, why: str, user, reason: str) -> Pla
 
 
 def replace_with_suggestion(meal: PlannedMeal, user, hint: str = '') -> PlannedMeal:
-    """Ask Claude for something else for this night, guided by the user's hint."""
+    """Ask Claude for something else for this meal, guided by the user's hint."""
     choice = planner.choose_replacement(meal, hint)
     recipe = planner.resolve_recipe(choice)
     return _swap(meal, recipe, choice.why, user, hint)
@@ -149,6 +155,11 @@ def push_to_cart(plan: MealPlan, grocery_items: list[str], user) -> CartPush:
     return CartPush.objects.create(plan=plan, user=user, results=results)
 
 
+def meals_label(meals) -> str:
+    """'Dinners' when every meal is a dinner (or there are none), else 'Meals'."""
+    return 'Dinners' if all(m.meal_type == 'dinner' for m in meals) else 'Meals'
+
+
 def plan_email_context(plan: MealPlan) -> dict:
     base = settings.APP_BASE_URL
     meals = list(plan.meals.select_related('recipe'))
@@ -156,6 +167,7 @@ def plan_email_context(plan: MealPlan) -> dict:
     previous = MealPlan.objects.filter(week_start=plan.week_start - timedelta(days=7)).first()
     return {
         'plan': plan,
+        'meals_label': meals_label(meals),
         'meals': [{'meal': m, 'url': base + reverse('meal_detail', args=[m.pk])} for m in meals],
         'avg_minutes': round(sum(minutes) / len(minutes)) if minutes else None,
         'favorites': sum(1 for m in meals if m.recipe.score > 0),
@@ -176,7 +188,7 @@ def send_plan_email(plan: MealPlan) -> list[str]:
         return []
     context = plan_email_context(plan)
     message = EmailMultiAlternatives(
-        subject=f'Dinners for the week of {plan.week_start:%b %-d}',
+        subject=f"{context['meals_label']} for the week of {plan.week_start:%b %-d}",
         body=render_to_string('email/plan_summary.txt', context),
         to=recipients,
     )

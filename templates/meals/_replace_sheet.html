@@ -2,7 +2,7 @@
     <div class="sheet-handle" aria-hidden="true"></div>
     <div class="offcanvas-header pb-2">
         <div class="min-w-0">
-            <p class="eyebrow">Swap {{ meal.date|date:"l" }}</p>
+            <p class="eyebrow">Swap {{ meal.date|date:"l" }}{% if meal.meal_type != 'dinner' %} {{ meal.get_meal_type_display|lower }}{% endif %}</p>
             <h2 class="offcanvas-title fs-5 fw-semibold text-truncate" id="replace-{{ sheet_id }}-label">{{ meal.recipe.name }}</h2>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>

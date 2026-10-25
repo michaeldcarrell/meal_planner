@@ -1,15 +1,16 @@
 # Meal Planner
 
-Plans the household's weeknight dinners with Claude, learns from 👍/👎 ratings and swaps,
-puts each dinner on a shared Google Calendar, emails the week's summary, and fills the
+Plans the household's weeknight dinners (plus any breakfasts and lunches you add) with Claude,
+learns from 👍/👎 ratings and swaps, puts each meal on a shared Google Calendar, emails the week's summary, and fills the
 King Soopers cart through the Kroger API.
 
 ## How a week works
 
 1. **Sunday 8am (Denver)** — Airflow's `meal_plan_weekly` DAG POSTs to
-   `/internal/generate-week/`. The app asks Claude for dinners on the configured weekdays
-   (default Mon–Fri), mixing well-liked repeats with new recipes, avoiding recent meals,
-   disliked/archived recipes and recent swap reasons. Each dinner becomes a calendar event,
+   `/internal/generate-week/`. The app asks Claude for the meals in the Preferences page's
+   meal schedule (default: dinners Mon–Fri; any mix of breakfasts, lunches and dinners per day),
+   mixing well-liked repeats with new recipes, avoiding recent meals,
+   disliked/archived recipes and recent swap reasons. Each meal becomes a calendar event,
    and everyone on the allowed list with *receives plan email* gets the summary. The email
    also links to last week's meals so people can rate them.
 2. **During the week** — anyone signed in can open the plan to:
@@ -55,8 +56,8 @@ King Soopers cart through the Kroger API.
 5. **First run** — run `docker exec -it meal_planner python manage.py createsuperuser`. Then in
    `/admin/`:
    - Add every household member under *Allowed users*.
-   - Fill in *Household settings*: weekdays, servings, time limit, dietary notes, calendar
-     ID and store.
+   - Fill in *Household settings*: servings, breakfast/lunch/dinner event times and lengths,
+     and pantry staples. Which meals to plan is set on the Preferences page.
    - To find the store ID, run `docker exec meal_planner python manage.py kroger_locations <zip>`.
 6. **Connect King Soopers** — open Groceries → *Connect your account* and sign in with the
    household's King Soopers login.

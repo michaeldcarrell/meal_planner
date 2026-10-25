@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Case, Sum, Value, When
 from django.utils import timezone
 
 
@@ -14,6 +14,28 @@ class AllowedUser(models.Model):
 
     def __str__(self):
         return self.name or self.email
+
+
+# Meal types in the order they're eaten. The schedule and PlannedMeal store the key.
+MEAL_TYPES = [('breakfast', 'Breakfast'), ('lunch', 'Lunch'), ('dinner', 'Dinner')]
+# Days in plan order (weeks start on Sunday), as Python weekday numbers: Monday=0 ... Sunday=6.
+PLAN_WEEKDAYS = [(6, 'Sun', 'S'), (0, 'Mon', 'M'), (1, 'Tue', 'T'), (2, 'Wed', 'W'), (3, 'Thu', 'T'),
+                 (4, 'Fri', 'F'), (5, 'Sat', 'S')]
+
+
+WEEKDAYS, WEEKEND, EVERY_DAY = [0, 1, 2, 3, 4], [5, 6], [0, 1, 2, 3, 4, 5, 6]
+# Shortcuts on the Preferences page; each fills the day grid, which can then be adjusted.
+MEAL_SCHEDULE_PRESETS = [
+    ('Weeknight dinners', {'dinner': WEEKDAYS}),
+    ('Dinner every night', {'dinner': EVERY_DAY}),
+    ('+ Weekend breakfasts', {'breakfast': WEEKEND, 'dinner': WEEKDAYS}),
+    ('+ Weekday lunches', {'lunch': WEEKDAYS, 'dinner': WEEKDAYS}),
+    ('Every meal', {'breakfast': EVERY_DAY, 'lunch': EVERY_DAY, 'dinner': EVERY_DAY}),
+]
+
+
+def default_meal_schedule():
+    return {'breakfast': [], 'lunch': [], 'dinner': list(WEEKDAYS)}
 
 
 # Options on the Preferences page. Keys are stored; labels are shown and sent to the planner.
@@ -40,8 +62,8 @@ MEAL_STYLES = [
 
 class HouseholdSettings(models.Model):
     """Singleton (pk=1) of planning knobs, edited in /admin/."""
-    # Comma-separated weekday numbers, Monday=0 ... Sunday=6.
-    meal_weekdays = models.CharField(max_length=20, default='0,1,2,3,4')
+    # Which days get which meals, set on the Preferences page: {"dinner": [0, 1, 2], ...}, Monday=0 ... Sunday=6.
+    meal_schedule = models.JSONField(default=default_meal_schedule, blank=True)
     servings = models.PositiveSmallIntegerField(default=4)
     max_weeknight_minutes = models.PositiveSmallIntegerField(default=45)
     favorites_per_week = models.PositiveSmallIntegerField(
@@ -51,6 +73,10 @@ class HouseholdSettings(models.Model):
     pantry_staples = models.TextField(
         blank=True, default='salt, black pepper, olive oil, vegetable oil, butter, all-purpose flour, sugar, garlic powder',
         help_text='Comma-separated items never added to the grocery cart.')
+    breakfast_time = models.TimeField(default='08:00')
+    breakfast_minutes = models.PositiveSmallIntegerField(default=30)
+    lunch_time = models.TimeField(default='12:00')
+    lunch_minutes = models.PositiveSmallIntegerField(default=45)
     dinner_time = models.TimeField(default='17:30')
     dinner_minutes = models.PositiveSmallIntegerField(default=60)
     calendar_id = models.CharField(
@@ -78,8 +104,18 @@ class HouseholdSettings(models.Model):
         return obj
 
     @property
-    def weekdays(self) -> list[int]:
-        return sorted({int(d) for d in self.meal_weekdays.split(',') if d.strip()})
+    def schedule(self) -> dict[str, list[int]]:
+        """Weekdays planned for each meal type, every type present (possibly empty)."""
+        saved = self.meal_schedule or {}
+        return {key: sorted({int(d) for d in saved.get(key, []) if 0 <= int(d) <= 6}) for key, _ in MEAL_TYPES}
+
+    @property
+    def meals_per_week(self) -> int:
+        return sum(len(days) for days in self.schedule.values())
+
+    def meal_window(self, meal_type: str) -> tuple:
+        """(start time, minutes) of a meal's calendar event."""
+        return getattr(self, f'{meal_type}_time'), getattr(self, f'{meal_type}_minutes')
 
     @property
     def pantry_staple_set(self) -> set[str]:
@@ -182,17 +218,22 @@ class MealPlan(models.Model):
 class PlannedMeal(models.Model):
     plan = models.ForeignKey(MealPlan, related_name='meals', on_delete=models.CASCADE)
     date = models.DateField()
+    meal_type = models.CharField(max_length=10, choices=MEAL_TYPES, default='dinner')
     recipe = models.ForeignKey(Recipe, related_name='planned_meals', on_delete=models.PROTECT)
     why = models.CharField(max_length=300, blank=True, help_text="Claude's one-line reason for the pick.")
     locked = models.BooleanField(default=False, help_text='Keep this meal when the week is regenerated.')
     calendar_event_id = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        ordering = ['date']
-        constraints = [models.UniqueConstraint(fields=['plan', 'date'], name='one_dinner_per_day')]
+        ordering = ['date', Case(*(When(meal_type=key, then=Value(i)) for i, (key, _) in enumerate(MEAL_TYPES)))]
+        constraints = [models.UniqueConstraint(fields=['plan', 'date', 'meal_type'], name='one_meal_per_slot')]
 
     def __str__(self):
-        return f'{self.date:%a %b %-d}: {self.recipe}'
+        return f'{self.date:%a %b %-d} {self.get_meal_type_display().lower()}: {self.recipe}'
+
+    @property
+    def slot(self) -> tuple:
+        return self.date, self.meal_type
 
 
 class MealSwap(models.Model):

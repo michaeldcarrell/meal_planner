@@ -1,7 +1,7 @@
-MEAL PLANNER — DINNERS {{ plan.week_start|date:"M j"|upper }} – {{ plan.week_end|date:"M j"|upper }}
-{{ meals|length }} dinners{% if avg_minutes %} · {{ avg_minutes }} min on average{% endif %}{% if favorites %} · {{ favorites }} favorite{{ favorites|pluralize }}{% endif %}
+MEAL PLANNER — {{ meals_label|upper }} {{ plan.week_start|date:"M j"|upper }} – {{ plan.week_end|date:"M j"|upper }}
+{{ meals|length }} {{ meals_label|lower }}{% if avg_minutes %} · {{ avg_minutes }} min on average{% endif %}{% if favorites %} · {{ favorites }} favorite{{ favorites|pluralize }}{% endif %}
 {% for m in meals %}
-{{ m.meal.date|date:"D j"|upper }}  {{ m.meal.recipe.name }}
+{{ m.meal.date|date:"D j"|upper }}  {% if meals_label != 'Dinners' %}{{ m.meal.get_meal_type_display|upper }}: {% endif %}{{ m.meal.recipe.name }}
   {{ m.meal.recipe.total_minutes|default:"?" }} min{% if m.meal.recipe.cuisine %} · {{ m.meal.recipe.cuisine }}{% endif %}
 {% if m.meal.recipe.summary %}  {{ m.meal.recipe.summary }}
 {% endif %}  Rate or swap: {{ m.url }}

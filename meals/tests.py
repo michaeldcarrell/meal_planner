@@ -25,11 +25,11 @@ def new_recipe(name, items=('yellow onion',)):
     )
 
 
-def fake_choose_week(dates, locked):
+def fake_choose_week(slots, locked):
     return [
-        planner.DinnerChoice(date=d.isoformat(), existing_recipe_id=None, new_recipe=new_recipe(f'Dish {d:%a}'),
-                             why='variety')
-        for d in dates if d not in locked
+        planner.MealChoice(date=d.isoformat(), meal_type=t, existing_recipe_id=None,
+                           new_recipe=new_recipe(f'Dish {d:%a}' if t == 'dinner' else f'{t.title()} {d:%a}'), why='variety')
+        for d, t in slots if (d, t) not in locked
     ]
 
 
@@ -66,11 +66,30 @@ class PlanServiceTests(TestCase):
         self.assertEqual(plan.meals.count(), 5)
         self.assertTrue(plan.meals.filter(pk=keep.pk).exists())
         self.assertEqual(delete_event.call_count, 4)
-        self.assertEqual(choose.call_args.args[1], {keep.date: keep.recipe})
+        self.assertEqual(choose.call_args.args[1], {(keep.date, 'dinner'): keep.recipe})
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_generate_week_follows_the_meal_schedule(self, choose, delete_event, sync):
+        household = HouseholdSettings.load()
+        household.meal_schedule = {'breakfast': [5, 6], 'lunch': [0], 'dinner': [0, 1]}
+        household.save()
+        plan = services.generate_week(SUNDAY)
+        self.assertEqual([(m.date.day, m.meal_type) for m in plan.meals.all()], [
+            (25, 'breakfast'), (26, 'lunch'), (26, 'dinner'), (27, 'dinner'), (31, 'breakfast')])
+        self.assertEqual(services.generate_week(SUNDAY), plan)
+        self.assertEqual(choose.call_count, 1)
+
+        # Adding a lunch later fills just that one.
+        household.meal_schedule['lunch'] = [0, 1]
+        household.save()
+        services.generate_week(SUNDAY)
+        self.assertEqual(choose.call_args.args[0][3], (date(2026, 10, 27), 'lunch'))
+        self.assertEqual(plan.meals.filter(meal_type='lunch').count(), 2)
 
     def test_resolve_recipe_reuses_known_recipe(self, *_):
         known = Recipe.objects.create(name='Tacos')
-        choice = planner.DinnerChoice(date='2026-10-26', existing_recipe_id=known.pk, new_recipe=None, why='loved')
+        choice = planner.MealChoice(date='2026-10-26', meal_type='dinner', existing_recipe_id=known.pk, new_recipe=None,
+                                    why='loved')
         self.assertEqual(planner.resolve_recipe(choice), known)
 
     @mock.patch('meals.planner.choose_replacement')
@@ -78,8 +97,8 @@ class PlanServiceTests(TestCase):
         plan = MealPlan.objects.create(week_start=SUNDAY)
         old = Recipe.objects.create(name='Chili')
         meal = PlannedMeal.objects.create(plan=plan, date=date(2026, 10, 26), recipe=old)
-        choose_replacement.return_value = planner.DinnerChoice(
-            date='2026-10-26', existing_recipe_id=None, new_recipe=new_recipe('Stir fry'), why='quicker')
+        choose_replacement.return_value = planner.MealChoice(
+            date='2026-10-26', meal_type='dinner', existing_recipe_id=None, new_recipe=new_recipe('Stir fry'), why='quicker')
         services.replace_with_suggestion(meal, self.user, 'something quicker')
         meal.refresh_from_db()
         self.assertEqual(meal.recipe.name, 'Stir fry')
@@ -90,8 +109,8 @@ class PlanServiceTests(TestCase):
     def test_grocery_list_merges_items_and_flags_staples(self, *_):
         plan = MealPlan.objects.create(week_start=SUNDAY)
         for i, name in enumerate(['A', 'B']):
-            recipe = planner.resolve_recipe(planner.DinnerChoice(
-                date='x', existing_recipe_id=None, new_recipe=new_recipe(name, ['Yellow Onion', f'item {name}']),
+            recipe = planner.resolve_recipe(planner.MealChoice(
+                date='x', meal_type='dinner', existing_recipe_id=None, new_recipe=new_recipe(name, ['Yellow Onion', f'item {name}']),
                 why=''))
             PlannedMeal.objects.create(plan=plan, date=date(2026, 10, 26 + i), recipe=recipe)
         items = {i['grocery_item']: i for i in services.grocery_list(plan)}
@@ -165,6 +184,35 @@ class PlanServiceTests(TestCase):
         services.generate_week(SUNDAY)
         self.assertNotContains(self.client.get(f'/plan/{SUNDAY}/'), 'Get set up')
 
+    def test_preferences_set_the_meal_schedule(self, *_):
+        self.client.force_login(self.user)
+        response = self.client.get('/preferences/')
+        self.assertContains(response, 'Meals each week')
+        self.assertContains(response, 'Weekend breakfasts')
+        self.client.post('/preferences/', {'days_breakfast': ['5', '6', '9', 'x'], 'days_dinner': ['0', '2', '2']})
+        household = HouseholdSettings.load()
+        self.assertEqual(household.schedule, {'breakfast': [5, 6], 'lunch': [], 'dinner': [0, 2]})
+        self.assertEqual(household.meals_per_week, 4)
+
+        # Unticking everything keeps the old schedule rather than planning nothing.
+        self.client.post('/preferences/', {})
+        self.assertEqual(HouseholdSettings.load().meals_per_week, 4)
+
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_mixed_week_labels_meals(self, *_):
+        household = HouseholdSettings.load()
+        household.meal_schedule = {'breakfast': [6], 'dinner': [0]}
+        household.save()
+        plan = services.generate_week(SUNDAY)
+        self.client.force_login(self.user)
+        page = self.client.get(f'/plan/{SUNDAY}/')
+        self.assertContains(page, '<h2>Meals</h2>', html=False)
+        self.assertContains(page, 'class="meal-type" aria-hidden="true">Breakfast</span>')
+        self.assertEqual(services.plan_email_context(plan)['meals_label'], 'Meals')
+        services.send_plan_email(plan)
+        self.assertTrue(mail.outbox[0].subject.startswith('Meals for the week of'))
+        self.assertIn('SUN 25  BREAKFAST: Breakfast Sun', mail.outbox[0].body)
+
     def test_preferences_save_and_reach_the_planner(self, *_):
         self.client.force_login(self.user)
         self.assertEqual(self.client.get('/preferences/').status_code, 200)
@@ -226,7 +274,8 @@ class PlanServiceTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get('/settings/')
         self.assertContains(response, 'Connect King Soopers')
-        self.assertContains(response, 'an event at 5:30 p.m.')
+        self.assertContains(response, 'dinner at 5:30 p.m.')
+        self.assertNotContains(response, 'breakfast at')
         response = self.client.get('/settings/', {'zip': '80112'})
         self.assertContains(response, 'King Soopers - Arapahoe')
         find_locations.assert_called_once_with('80112')
@@ -272,6 +321,15 @@ class CalendarSyncTests(TestCase):
         self.assertFalse({'start', 'end'} & patch['body'].keys())
         self.assertEqual(self.events.insert.call_count, 1)
 
+    def test_breakfast_uses_its_own_time_and_icon(self):
+        self.meal.meal_type = 'breakfast'
+        self.meal.save()
+        calendar_sync.sync_meal(self.meal)
+        body = self.events.insert.call_args.kwargs['body']
+        self.assertEqual((body['start']['dateTime'], body['end']['dateTime']),
+                         ('2026-10-26T08:00:00', '2026-10-26T08:30:00'))
+        self.assertEqual(body['summary'], '🍳 Tacos')
+
     def test_event_deleted_in_google_is_recreated(self):
         from googleapiclient.errors import HttpError
         self.meal.calendar_event_id = 'gone'
@@ -290,8 +348,8 @@ class PlannerRequestTests(TestCase):
         import anthropic
         import httpx2
 
-        payload = {'dinners': [{
-            'date': '2026-10-26', 'existing_recipe_id': None, 'why': 'new',
+        payload = {'meals': [{
+            'date': '2026-10-26', 'meal_type': 'lunch', 'existing_recipe_id': None, 'why': 'new',
             'new_recipe': new_recipe('Tacos').model_dump(),
         }]}
         seen = {}
@@ -307,7 +365,7 @@ class PlannerRequestTests(TestCase):
 
         client = anthropic.Anthropic(api_key='test', http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
         with mock.patch('meals.planner._client', return_value=client):
-            choices = planner.choose_week([date(2026, 10, 26)], {})
+            choices = planner.choose_week([(date(2026, 10, 26), 'lunch')], {})
         self.assertEqual(choices[0].new_recipe.name, 'Tacos')
         self.assertEqual(seen['body']['output_config']['format']['type'], 'json_schema')
         self.assertEqual(seen['body']['fallbacks'], 'default')

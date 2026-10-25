@@ -63,3 +63,22 @@ document.querySelectorAll('[data-copy]').forEach(button => button.addEventListen
         window.getSelection().selectAllChildren(document.querySelector(button.dataset.copy));
     }
 }));
+
+// Preferences meal schedule: quick picks fill the day grid; counts follow the checkboxes.
+const mealSchedule = document.querySelector('[data-meal-schedule]');
+if (mealSchedule) {
+    const boxes = [...mealSchedule.querySelectorAll('input[data-meal-type]')];
+    const presets = JSON.parse(document.getElementById('meal-presets').textContent);
+    const update = () => {
+        mealSchedule.querySelectorAll('.schedule-row').forEach(row => {
+            row.querySelector('[data-meal-count]').textContent = row.querySelectorAll('input:checked').length;
+        });
+        mealSchedule.querySelector('[data-meal-total]').textContent = boxes.filter(b => b.checked).length;
+    };
+    boxes.forEach(b => b.addEventListener('change', update));
+    mealSchedule.querySelectorAll('[data-preset]').forEach(button => button.addEventListener('click', () => {
+        const preset = presets[button.dataset.preset];
+        boxes.forEach(b => { b.checked = (preset[b.dataset.mealType] || []).includes(Number(b.value)); });
+        update();
+    }));
+}

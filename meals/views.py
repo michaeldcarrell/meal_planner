@@ -18,7 +18,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from meals import calendar_sync, kroger, services
 from meals.models import (
-    COOK_TIMES, CUISINES, MEAL_STYLES, PROTEIN_LEVELS, PROTEINS, HouseholdSettings, KrogerAuth, MealPlan,
+    COOK_TIMES, CUISINES, MEAL_SCHEDULE_PRESETS, MEAL_STYLES, MEAL_TYPES, PLAN_WEEKDAYS, PROTEIN_LEVELS, PROTEINS, HouseholdSettings, KrogerAuth, MealPlan,
     MemberPreferences, PlannedMeal, Rating, Recipe, week_start_for,
 )
 
@@ -54,9 +54,9 @@ def _setup_steps() -> list[dict] | None:
         {'label': 'Choose your King Soopers store', 'done': bool(household.kroger_location_id),
          'hint': 'Products and prices come from this store.', 'url': '/settings/#store'},
         {'label': 'Connect a Google Calendar', 'done': bool(household.calendar_id),
-         'hint': 'Each dinner shows up as an event with the recipe.', 'url': '/settings/#calendar'},
+         'hint': 'Each meal shows up as an event with the recipe.', 'url': '/settings/#calendar'},
         {'label': 'Plan your first week', 'done': MealPlan.objects.filter(meals__isnull=False).exists(),
-         'hint': 'Dinners go on the calendar and the grocery list is built from them.', 'url': None},
+         'hint': 'Meals go on the calendar and the grocery list is built from them.', 'url': None},
     ]
     return None if all(step['done'] for step in steps) else steps
 
@@ -84,6 +84,9 @@ class PlanView(LoginRequiredMixin, View):
             'week_end': start + timedelta(days=6),
             'today': timezone.localdate(),
             'meals': meals,
+            'meals_label': services.meals_label(meals),
+            # Name each meal's type once the week has more than dinners in it.
+            'show_meal_types': any(m.meal_type != 'dinner' for m in meals),
             'avg_minutes': round(sum(minutes) / len(minutes)) if minutes else None,
             'locked_count': sum(1 for m in meals if m.locked),
             'prev_week': (start - timedelta(days=7)).isoformat(),
@@ -235,7 +238,7 @@ class CurrentGroceries(LoginRequiredMixin, View):
     def get(self, request):
         start = week_start_for(timezone.localdate())
         if not MealPlan.objects.filter(week_start=start, meals__isnull=False).exists():
-            messages.error(request, 'Plan this week first; the grocery list comes from its dinners.')
+            messages.error(request, 'Plan this week first; the grocery list comes from its meals.')
             return redirect('plan', start.isoformat())
         return redirect('groceries', start.isoformat())
 
@@ -246,8 +249,13 @@ class PreferencesView(LoginRequiredMixin, View):
         household = HouseholdSettings.load()
         mine = MemberPreferences.objects.filter(user=request.user).first()
         proteins = household.protein_preferences or {}
+        schedule = household.schedule
         return render(request, 'meals/preferences.html', {
             'household': household,
+            'schedule': [(key, label, schedule[key]) for key, label in MEAL_TYPES],
+            'plan_weekdays': PLAN_WEEKDAYS,
+            'schedule_presets': [label for label, _ in MEAL_SCHEDULE_PRESETS],
+            'schedule_presets_data': [days for _, days in MEAL_SCHEDULE_PRESETS],
             'cook_times': COOK_TIMES,
             'proteins': [(key, label, proteins.get(key, 'some')) for key, label in PROTEINS],
             'protein_levels': PROTEIN_LEVELS,
@@ -259,6 +267,14 @@ class PreferencesView(LoginRequiredMixin, View):
 
     def post(self, request):
         household = HouseholdSettings.load()
+        schedule = {
+            key: sorted({int(d) for d in request.POST.getlist(f'days_{key}') if d in '0123456' and len(d) == 1})
+            for key, _ in MEAL_TYPES
+        }
+        if any(schedule.values()):
+            household.meal_schedule = schedule
+        else:
+            messages.error(request, 'Pick at least one meal a week; kept your previous meal schedule.')
         try:
             minutes = int(request.POST.get('max_minutes', ''))
         except ValueError:
@@ -349,13 +365,13 @@ class SetCalendar(LoginRequiredMixin, View):
         household.calendar_id = calendar_id
         household.save(update_fields=['calendar_id'])
         if not calendar_id:
-            messages.success(request, 'Calendar disconnected. Dinners will no longer be added.')
+            messages.success(request, 'Calendar disconnected. Meals will no longer be added.')
             return redirect('/settings/#calendar')
         plan = MealPlan.objects.filter(week_start=week_start_for(timezone.localdate())).first()
         synced, failed = services.sync_plan_calendar(plan) if plan else (0, 0)
-        messages.success(request, 'Calendar connected.' + (f' Added {synced} dinners from this week.' if synced else ''))
+        messages.success(request, 'Calendar connected.' + (f' Added {synced} meals from this week.' if synced else ''))
         if failed:
-            messages.error(request, f'{failed} dinners could not be added; see the server log.')
+            messages.error(request, f'{failed} meals could not be added; see the server log.')
         return redirect('/settings/#calendar')
 
 
@@ -366,9 +382,9 @@ class SyncCalendar(LoginRequiredMixin, View):
             return redirect('/settings/#calendar')
         synced, failed = services.sync_plan_calendar(plan)
         if failed:
-            messages.error(request, f'Synced {synced} dinners; {failed} failed. See the server log.')
+            messages.error(request, f'Synced {synced} meals; {failed} failed. See the server log.')
         else:
-            messages.success(request, f"Synced {synced} dinners to the calendar.")
+            messages.success(request, f"Synced {synced} meals to the calendar.")
         return redirect('/settings/#calendar')
 
 
@@ -413,6 +429,7 @@ class InternalGenerateWeek(View):
             sent_to = services.send_plan_email(plan)
         return JsonResponse({
             'week_start': plan.week_start.isoformat(),
-            'meals': [{'date': m.date.isoformat(), 'recipe': m.recipe.name} for m in plan.meals.select_related('recipe')],
+            'meals': [{'date': m.date.isoformat(), 'meal_type': m.meal_type, 'recipe': m.recipe.name}
+                      for m in plan.meals.select_related('recipe')],
             'emailed': sent_to,
         })

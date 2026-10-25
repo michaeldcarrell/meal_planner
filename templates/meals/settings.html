@@ -70,7 +70,7 @@
         <h2>Google Calendar</h2>
         {% if household.calendar_id %}<span class="tag text-like">Connected</span>{% else %}<span class="tag">Not connected</span>{% endif %}
     </div>
-    <p class="small text-body-secondary pt-3">Each planned dinner becomes an event at {{ household.dinner_time|time:"g:i a" }} with the recipe, ingredients and a link back here.</p>
+    <p class="small text-body-secondary pt-3">Each planned meal becomes an event with the recipe, ingredients and a link back here{% with schedule=household.schedule %}: {% if schedule.breakfast %}breakfast at {{ household.breakfast_time|time:"g:i a" }}, {% endif %}{% if schedule.lunch %}lunch at {{ household.lunch_time|time:"g:i a" }}, {% endif %}dinner at {{ household.dinner_time|time:"g:i a" }}{% endwith %}.</p>
     {% if not household.calendar_id %}
     <ol class="calendar-steps small">
         <li>In Google Calendar, open the calendar's <strong>Settings and sharing</strong> (or create a new one, like "Dinners").</li>
@@ -97,8 +97,8 @@
     </form>
     {% if household.calendar_id and current_plan %}
     <form method="post" action="{% url 'sync_calendar' %}" class="slow mt-3">{% csrf_token %}
-        <button type="submit" class="btn btn-outline-secondary">Sync this week's dinners</button>
-        <span class="small text-body-secondary d-block mt-2">New and swapped dinners sync on their own; use this if events are missing.</span>
+        <button type="submit" class="btn btn-outline-secondary">Sync this week's meals</button>
+        <span class="small text-body-secondary d-block mt-2">New and swapped meals sync on their own; use this if events are missing.</span>
     </form>
     {% endif %}
 </section>
@@ -106,7 +106,7 @@
 {% if user.is_staff %}
 <section class="section">
     <div class="section-header"><h2>Planning</h2></div>
-    <p class="small text-body-secondary pt-3">Which nights to plan, servings, dinner time, pantry staples and who's allowed in are in the admin.</p>
+    <p class="small text-body-secondary pt-3">Servings, meal times, pantry staples and who's allowed in are in the admin. Which meals to plan is on Preferences.</p>
     <a class="btn btn-outline-secondary" href="/admin/meals/householdsettings/1/change/">Open household settings</a>
     <a class="btn btn-quiet" href="/admin/meals/alloweduser/">Manage members</a>
 </section>

@@ -6,12 +6,12 @@
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
     Week of {{ meal.plan.week_start|date:"M j" }}
 </a>
-<p class="eyebrow mt-1">{{ meal.date|date:"l, M j" }}{% if meal.locked %} <span class="tag tag-accent ms-1">Locked</span>{% endif %}</p>
+<p class="eyebrow mt-1">{{ meal.get_meal_type_display }} · {{ meal.date|date:"l, M j" }}{% if meal.locked %} <span class="tag tag-accent ms-1">Locked</span>{% endif %}</p>
 {% include "meals/_recipe_body.html" %}
 
 <div class="note mt-4 d-flex align-items-center justify-content-between gap-3 flex-wrap">
     <span>Not feeling it?</span>
-    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#replace-detail" aria-controls="replace-detail">Swap this dinner</button>
+    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#replace-detail" aria-controls="replace-detail">Swap this {{ meal.get_meal_type_display|lower }}</button>
 </div>
 {% include "meals/_replace_sheet.html" with sheet_id="detail" next=request.path %}
 {% endblock %}

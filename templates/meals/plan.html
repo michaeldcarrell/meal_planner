@@ -33,14 +33,14 @@
 
 {% if not plan or not meals %}
 <div class="note text-center mt-4">
-    <p class="mb-3">No dinners planned for this week yet.</p>
+    <p class="mb-3">No meals planned for this week yet.</p>
     <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow">{% csrf_token %}
         <button type="submit" class="btn btn-primary px-4">Plan this week</button>
     </form>
 </div>
 {% else %}
 <div class="stat-strip mt-3">
-    <div><span class="stat-label">Dinners</span><span class="stat-value">{{ meals|length }}</span></div>
+    <div><span class="stat-label">{{ meals_label }}</span><span class="stat-value">{{ meals|length }}</span></div>
     <div><span class="stat-label">Avg time</span><span class="stat-value">{% if avg_minutes %}{{ avg_minutes }} min{% else %}—{% endif %}</span></div>
     <div><span class="stat-label">Locked</span><span class="stat-value">{{ locked_count }}</span></div>
 </div>
@@ -56,15 +56,16 @@
 </div>
 
 <section class="section">
-    <div class="section-header"><h2>Dinners</h2><span class="list-row-meta">Tap a dinner for the recipe</span></div>
+    <div class="section-header"><h2>{{ meals_label }}</h2><span class="list-row-meta">Tap a meal for the recipe</span></div>
     {% for meal in meals %}
     <article class="day-row{% if meal.date == today %} is-today{% endif %}" id="meal-{{ meal.pk }}">
         <div class="day-date" aria-hidden="true">
-            <span class="dow">{{ meal.date|date:"D" }}</span>
-            <span class="dom">{{ meal.date|date:"j" }}</span>
+            {% ifchanged meal.date %}<span class="dow">{{ meal.date|date:"D" }}</span>
+            <span class="dom">{{ meal.date|date:"j" }}</span>{% endifchanged %}
         </div>
         <div class="min-w-0">
-            <span class="visually-hidden">{{ meal.date|date:"l, F j" }}:</span>
+            <span class="visually-hidden">{{ meal.date|date:"l, F j" }} {{ meal.get_meal_type_display|lower }}:</span>
+            {% if show_meal_types %}<span class="meal-type" aria-hidden="true">{{ meal.get_meal_type_display }}</span>{% endif %}
             <a class="day-recipe" href="{% url 'meal_detail' meal.pk %}">{{ meal.recipe.name }}</a>
             <div class="meta mt-1">
                 <span>{{ meal.recipe.total_minutes|default:"?" }} min</span>
@@ -112,11 +113,11 @@
             <button class="btn btn-outline-secondary">Email the summary</button>
         </form>
         <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow d-grid"
-              data-confirm="Re-pick every unlocked dinner this week?">{% csrf_token %}
+              data-confirm="Re-pick every unlocked meal this week?">{% csrf_token %}
             <input type="hidden" name="regenerate" value="1">
-            <button type="submit" class="btn btn-outline-secondary">Regenerate unlocked dinners</button>
+            <button type="submit" class="btn btn-outline-secondary">Regenerate unlocked meals</button>
         </form>
-        <p class="small text-body-secondary mb-0">Locked dinners stay put when you regenerate.</p>
+        <p class="small text-body-secondary mb-0">Locked meals stay put when you regenerate.</p>
     </div>
 </div>
 {% endif %}

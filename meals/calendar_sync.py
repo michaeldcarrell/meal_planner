@@ -14,6 +14,7 @@ from meals.models import HouseholdSettings, PlannedMeal
 logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.events']
+EVENT_ICONS = {'breakfast': '🍳', 'lunch': '🥪', 'dinner': '🍽'}
 
 
 def service_account_email() -> str:
@@ -57,7 +58,7 @@ def _event_content(meal: PlannedMeal) -> dict:
         f"Rate or replace: {link}"
     )
     return {
-        'summary': f'🍽 {recipe.name}',
+        'summary': f'{EVENT_ICONS[meal.meal_type]} {recipe.name}',
         'description': description,
         'source': {'title': 'Meal Planner', 'url': link},
     }
@@ -67,7 +68,7 @@ def sync_meal(meal: PlannedMeal):
     """Create or update the meal's calendar event. No-op when no calendar is configured.
 
     The time is set only when the event is created. Later syncs patch just the content, so a
-    dinner moved (or given guests, reminders, a colour) in Google Calendar stays that way.
+    meal moved (or given guests, reminders, a colour) in Google Calendar stays that way.
     """
     household = HouseholdSettings.load()
     if not household.calendar_id:
@@ -82,8 +83,9 @@ def sync_meal(meal: PlannedMeal):
             if e.resp.status not in (404, 410):
                 raise
             logger.info('Calendar event %s gone; recreating', meal.calendar_event_id)
-    start = datetime.combine(meal.date, household.dinner_time)
-    end = start + timedelta(minutes=household.dinner_minutes)
+    start_time, minutes = household.meal_window(meal.meal_type)
+    start = datetime.combine(meal.date, start_time)
+    end = start + timedelta(minutes=minutes)
     body = {
         **content,
         'start': {'dateTime': start.isoformat(), 'timeZone': settings.TIME_ZONE},

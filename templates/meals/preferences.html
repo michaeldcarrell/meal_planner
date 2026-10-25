@@ -7,7 +7,31 @@
 <form method="post">{% csrf_token %}
     <p class="eyebrow mt-4">For the household</p>
 
-    <section class="section mt-2">
+    <section class="section mt-2" data-meal-schedule>
+        <div class="section-header"><h2>Meals each week</h2><span class="list-row-meta"><span data-meal-total>{{ household.meals_per_week }}</span> a week</span></div>
+        <div class="chips pt-3" role="group" aria-label="Quick picks">
+            {% for label in schedule_presets %}
+            <button type="button" class="chip-button" data-preset="{{ forloop.counter0 }}">{{ label }}</button>
+            {% endfor %}
+        </div>
+        {% for key, label, days in schedule %}
+        <fieldset class="schedule-row">
+            <legend><span>{{ label }}</span><span class="choice-detail"><span data-meal-count>{{ days|length }}</span> a week</span></legend>
+            <div class="day-toggles">
+                {% for num, short, letter in plan_weekdays %}
+                <label class="day-toggle">
+                    <input type="checkbox" name="days_{{ key }}" value="{{ num }}" data-meal-type="{{ key }}" {% if num in days %}checked{% endif %}>
+                    <span aria-hidden="true">{{ letter }}</span><span class="visually-hidden">{{ label }} on {{ short }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        {% endfor %}
+        <p class="small text-body-secondary pt-3 mb-0">Weekday breakfasts and lunches are kept quicker than dinner; weekend ones can take longer.</p>
+        {{ schedule_presets_data|json_script:"meal-presets" }}
+    </section>
+
+    <section class="section">
         <div class="section-header"><h2>Cooking time</h2></div>
         <div class="choice-grid pt-3">
             {% for minutes, label, detail in cook_times %}
