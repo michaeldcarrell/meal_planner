@@ -741,11 +741,16 @@ a.list-row:hover {
     margin: 12px 0 16px 0;
 }
 
+/* Capped so the photo stays a header, not the page: at most 480×240, phone-width or not. */
+figure.recipe-hero {
+    max-width: 480px;
+}
+
 .recipe-hero img {
     display: block;
     width: 100%;
     height: auto;
-    aspect-ratio: 1200 / 627;
+    aspect-ratio: 2 / 1;
     border-radius: 8px;
     object-fit: cover;
     background: var(--mp-surface-2);
