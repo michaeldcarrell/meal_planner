@@ -2,15 +2,16 @@ import json
 from datetime import date
 from unittest import mock
 
+import requests
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from meals import calendar_sync, planner, services
+from meals import calendar_sync, photos, planner, services
 from meals.models import (
     AllowedUser, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, MealSwap, PlannedMeal, Rating, Recipe,
-    week_start_for,
+    RecipePhoto, week_start_for,
 )
 
 SUNDAY = date(2026, 10, 25)
@@ -21,7 +22,7 @@ def new_recipe(name, items=('yellow onion',)):
         name=name, summary=f'{name} summary', cuisine='Mexican', total_minutes=30, servings=4,
         ingredients=[planner.Ingredient(name=i, quantity='1', grocery_item=i, pantry_staple=False) for i in items]
         + [planner.Ingredient(name='salt', quantity='1 tsp', grocery_item='salt', pantry_staple=True)],
-        instructions='1. Cook.',
+        instructions='1. Cook.', photo_query=name.lower(),
     )
 
 
@@ -55,6 +56,44 @@ class PlanServiceTests(TestCase):
         services.generate_week(SUNDAY)
         self.assertEqual(choose.call_count, 1)
         self.assertEqual(plan.meals.count(), 5)
+
+    def test_week_page_shows_a_plan_still_being_generated(self, *_):
+        """Leaving the week mid-plan and coming back shows it's still planning, and a second click
+        doesn't start another run."""
+        seen = {}
+
+        def choose(slots, locked, hint=''):
+            self.client.force_login(self.user)
+            page = self.client.get(f'/plan/{SUNDAY}/')
+            seen['page'] = page.content.decode()
+            seen['status'] = self.client.get(f'/plan/{SUNDAY}/status/').json()
+            with mock.patch('meals.planner.choose_week') as second:
+                self.client.post(f'/plan/{SUNDAY}/generate/')
+                seen['second_run'] = second.called
+            return fake_choose_week(slots, locked)
+
+        with mock.patch('meals.planner.choose_week', side_effect=choose):
+            plan = services.generate_week(SUNDAY)
+        self.assertIn('Planning this week', seen['page'])
+        self.assertNotIn('Plan this week</button>', seen['page'])
+        self.assertEqual(seen['status'], {'generating': True})
+        self.assertFalse(seen['second_run'])
+        self.assertEqual(plan.meals.count(), 5)
+        self.assertEqual(self.client.get(f'/plan/{SUNDAY}/status/').json(), {'generating': False})
+        self.assertNotIn('Planning this week', self.client.get(f'/plan/{SUNDAY}/').content.decode())
+
+    @mock.patch('meals.planner.choose_week', side_effect=RuntimeError('boom'))
+    def test_failed_generation_clears_the_flag_and_stale_flags_expire(self, *_):
+        with self.assertRaises(RuntimeError):
+            services.generate_week(SUNDAY)
+        plan = MealPlan.objects.get(week_start=SUNDAY)
+        self.assertIsNone(plan.generating_since)
+        # A run killed outright (worker timeout) never clears it; it stops counting after a while.
+        plan.generating_since = timezone.now() - MealPlan.GENERATING_STALE_AFTER
+        plan.save()
+        self.assertFalse(plan.is_generating)
+        with self.assertRaises(RuntimeError):  # not PlanBusy: the stale claim is taken over
+            services.generate_week(SUNDAY)
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_regenerate_keeps_locked_meals(self, choose, delete_event, sync):
@@ -523,3 +562,126 @@ class PlannerRequestTests(TestCase):
         self.assertEqual(choices[0].new_recipe.name, 'Tacos')
         self.assertEqual(seen['body']['output_config']['format']['type'], 'json_schema')
         self.assertEqual(seen['body']['fallbacks'], 'default')
+
+
+def _png(width=3000, height=2000) -> bytes:
+    import io
+    from PIL import Image
+    out = io.BytesIO()
+    Image.new('RGB', (width, height), (200, 120, 40)).save(out, 'PNG')
+    return out.getvalue()
+
+
+def _pixabay_get(photos_by_query, image=b'\xff\xd8jpeg-bytes'):
+    """A stand-in for requests.get: Pixabay search answers from `photos_by_query`, image downloads return `image`."""
+    calls = []
+
+    def get(url, params=None, headers=None, timeout=None):
+        calls.append(params['q'] if params else url)
+        response = mock.Mock(headers={'Content-Type': 'image/jpeg'}, content=image)
+        response.raise_for_status.return_value = None
+        response.ok = True
+        if params:
+            hit = photos_by_query.get(params['q'])
+            response.json.return_value = {'hits': [hit] if hit else []}
+        return response
+    get.calls = calls
+    return get
+
+
+PIXABAY_HIT = {'pageURL': 'https://pixabay.com/photos/noodles-123/', 'user': 'Ana Cook',
+               'largeImageURL': 'https://pixabay.com/get/123_1280.jpg', 'webformatURL': 'https://pixabay.com/get/123_640.jpg'}
+
+
+@override_settings(PIXABAY_API_KEY='pixabay-key')
+class RecipePhotoTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='mike', email='mike@example.com', first_name='Mike')
+        AllowedUser.objects.create(email='mike@example.com')
+        self.recipe = Recipe.objects.create(name='Peanut Noodles with Edamame and Crunchy Veggies',
+                                            photo_query='peanut noodles')
+
+    def test_search_words_fall_back_to_the_short_name(self):
+        self.recipe.photo_query = ''
+        self.assertEqual(photos.search_queries(self.recipe),
+                         ['Peanut Noodles', 'Peanut Noodles with Edamame and Crunchy Veggies'])
+
+    def test_fetch_stores_the_first_match_with_its_credit(self):
+        get = _pixabay_get({'peanut noodles': PIXABAY_HIT})
+        with mock.patch('meals.photos.requests.get', side_effect=get):
+            self.assertTrue(photos.fetch_photo(self.recipe))
+        self.assertEqual(get.calls, ['peanut noodles', 'https://pixabay.com/get/123_1280.jpg'])
+        self.recipe.refresh_from_db()
+        self.assertEqual((self.recipe.photo_source, self.recipe.photo_credit), ('pixabay', 'Ana Cook'))
+        self.assertEqual(bytes(self.recipe.photo.image), b'\xff\xd8jpeg-bytes')
+        self.assertTrue(self.recipe.photo_url.startswith(f'/recipes/{self.recipe.pk}/photo/?v='))
+
+    def test_no_match_is_searched_once_and_errors_are_retried(self):
+        get = _pixabay_get({})
+        with mock.patch('meals.photos.requests.get', side_effect=get):
+            self.assertEqual(photos.fetch_missing_photos(), 0)
+            self.assertEqual(photos.fetch_missing_photos(), 0)
+        self.assertEqual(len(get.calls), 3)  # three queries, once
+        self.assertEqual(self.recipe.photo_url, '')
+
+        other = Recipe.objects.create(name='Tacos', photo_query='tacos')
+        with mock.patch('meals.photos.requests.get', side_effect=requests.ConnectionError):
+            self.assertFalse(photos.fetch_photo(other))
+        other.refresh_from_db()
+        self.assertIsNone(other.photo_searched_at)  # picked up again next run
+
+    @mock.patch('meals.calendar_sync.sync_meal')
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_planning_returns_before_photos_are_found(self, *_):
+        get = _pixabay_get({f'dish {d}': PIXABAY_HIT for d in ('mon', 'tue', 'wed', 'thu', 'fri')})
+        queued = []
+        with mock.patch('meals.photos._run_in_background', side_effect=queued.append), \
+                mock.patch('meals.photos.requests.get', side_effect=get), \
+                self.captureOnCommitCallbacks(execute=True):
+            plan = services.generate_week(SUNDAY)
+            self.assertEqual(get.calls, [])  # nothing fetched while planning
+        self.assertEqual(len(queued), 1)
+        with mock.patch('meals.photos.requests.get', side_effect=get):
+            queued[0]()
+        for meal in plan.meals.select_related('recipe'):
+            self.assertEqual(meal.recipe.photo_source, 'pixabay')
+
+    @override_settings(PIXABAY_API_KEY='')
+    def test_without_a_key_nothing_is_queued(self):
+        with mock.patch('meals.photos._run_in_background') as run, self.captureOnCommitCallbacks(execute=True):
+            photos.fetch_missing_photos_soon()
+        run.assert_not_called()
+
+    def test_upload_replaces_the_photo_scaled_down_and_can_be_removed(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+        self.client.force_login(self.user)
+        page = f'/recipes/{self.recipe.pk}/'
+        self.assertContains(self.client.get(page), 'Add your photo')
+        response = self.client.post(f'/recipes/{self.recipe.pk}/photo/upload/', {
+            'photo': SimpleUploadedFile('dinner.png', _png(), content_type='image/png'), 'next': page})
+        self.assertRedirects(response, page, fetch_redirect_response=False)
+        self.recipe.refresh_from_db()
+        self.assertEqual((self.recipe.photo_source, self.recipe.photo_credit), ('upload', 'Mike'))
+        served = self.client.get(self.recipe.photo_url)
+        self.assertEqual(served['Content-Type'], 'image/jpeg')
+        self.assertEqual(Image.open(io.BytesIO(served.content)).size, (1600, 1067))
+        self.assertContains(self.client.get(page), self.recipe.photo_url)
+
+        self.client.post(f'/recipes/{self.recipe.pk}/photo/upload/', {'remove': '1', 'next': page})
+        self.recipe.refresh_from_db()
+        self.assertEqual(self.recipe.photo_url, '')
+        self.assertFalse(RecipePhoto.objects.exists())
+        self.assertEqual(photos.fetch_missing_photos(), 0)  # a removed photo isn't searched for again
+
+    def test_unreadable_upload_is_rejected(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.force_login(self.user)
+        self.client.post(f'/recipes/{self.recipe.pk}/photo/upload/',
+                         {'photo': SimpleUploadedFile('notes.txt', b'not a photo', content_type='text/plain')})
+        self.assertFalse(RecipePhoto.objects.exists())
+
+    def test_photo_needs_login(self):
+        RecipePhoto.objects.create(recipe=self.recipe, image=b'x')
+        self.assertEqual(self.client.get(f'/recipes/{self.recipe.pk}/photo/').status_code, 302)

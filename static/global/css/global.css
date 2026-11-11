@@ -715,6 +715,71 @@ a.list-row:hover {
     color: var(--mp-dim);
 }
 
+/* Recipe photos: a thumbnail on the week and recipe lists, a wide one atop the recipe. */
+.day-thumb {
+    float: right;
+    margin: 0 0 6px 12px;
+}
+
+.day-thumb img,
+.list-thumb {
+    display: block;
+    width: 76px;
+    height: 76px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--mp-surface-2);
+}
+
+.list-thumb {
+    flex: none;
+    width: 48px;
+    height: 48px;
+}
+
+.recipe-hero {
+    margin: 12px 0 16px 0;
+}
+
+.recipe-hero img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1200 / 627;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--mp-surface-2);
+}
+
+.recipe-hero figcaption,
+.recipe-hero.is-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--mp-muted);
+}
+
+.recipe-hero figcaption a {
+    color: inherit;
+}
+
+.recipe-hero.is-empty {
+    padding: 12px 16px;
+    border: 1px dashed var(--mp-line);
+    border-radius: 8px;
+    background: var(--mp-surface-2);
+    font-size: 14px;
+}
+
+.photo-actions {
+    display: inline-flex;
+    gap: 4px;
+}
+
 .day-actions {
     display: flex;
     align-items: center;

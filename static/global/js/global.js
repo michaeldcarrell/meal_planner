@@ -19,6 +19,28 @@ document.querySelectorAll('form.slow').forEach(form => form.addEventListener('su
     if (btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Thinking…';
 }));
 
+// Week page while a plan is being generated (maybe started from another tab or before navigating away):
+// poll until it's done, then reload to show it.
+const planStatus = document.querySelector('[data-plan-status]');
+if (planStatus) {
+    const poll = async () => {
+        try {
+            const res = await fetch(planStatus.dataset.planStatus, {headers: {Accept: 'application/json'}});
+            if (res.ok && !(await res.json()).generating) return location.reload();
+        } catch {}
+        setTimeout(poll, 4000);
+    };
+    setTimeout(poll, 4000);
+}
+
+// File inputs that submit as soon as something is picked (recipe photos).
+document.querySelectorAll('input[type=file][data-autosubmit]').forEach(input => input.addEventListener('change', () => {
+    if (!input.files.length) return;
+    const label = input.closest('label');
+    if (label) label.lastChild.textContent = ' Uploading…';
+    input.form.requestSubmit();
+}));
+
 // Forms that ask before submitting (e.g. regenerate the week).
 document.querySelectorAll('form[data-confirm]').forEach(form => form.addEventListener('submit', event => {
     if (!confirm(form.dataset.confirm)) {

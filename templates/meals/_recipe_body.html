@@ -1,3 +1,17 @@
+{% if recipe.photo_url %}
+<figure class="recipe-hero">
+    <img src="{{ recipe.photo_url }}" alt="{{ recipe.name }}" width="1200" height="627">
+    <figcaption>
+        <span class="min-w-0">{% if recipe.photo_source == 'pixabay' %}Photo by {% if recipe.photo_credit_url %}<a href="{{ recipe.photo_credit_url }}" target="_blank" rel="noopener">{{ recipe.photo_credit }}</a>{% else %}{{ recipe.photo_credit }}{% endif %} on <a href="https://pixabay.com" target="_blank" rel="noopener">Pixabay</a>{% else %}Photo by {{ recipe.photo_credit }}{% endif %}</span>
+        {% include "meals/_photo_forms.html" %}
+    </figcaption>
+</figure>
+{% else %}
+<div class="recipe-hero is-empty">
+    <span>No photo yet. Cooked it? Add yours.</span>
+    {% include "meals/_photo_forms.html" %}
+</div>
+{% endif %}
 <h1 class="detail-title">{{ recipe.name }}</h1>
 <div class="meta mt-2">
     <span>{{ recipe.total_minutes|default:"?" }} min</span>

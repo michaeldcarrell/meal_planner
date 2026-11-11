@@ -64,6 +64,7 @@ class NewRecipe(BaseModel):
     servings: int
     ingredients: list[Ingredient]
     instructions: str
+    photo_query: str = Field(description='2-4 words to find a stock photo of the finished dish, e.g. "peanut noodles".')
 
 
 MealType = Literal['breakfast', 'lunch', 'dinner']
@@ -249,4 +250,5 @@ def resolve_recipe(choice: MealChoice) -> Recipe:
         servings=new.servings,
         ingredients=[i.model_dump() for i in new.ingredients],
         instructions=new.instructions,
+        photo_query=new.photo_query[:100],
     )

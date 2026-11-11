@@ -1,0 +1,16 @@
+<span class="photo-actions">
+    <form method="post" enctype="multipart/form-data" action="{% url 'recipe_photo_upload' recipe.pk %}">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <label class="btn btn-quiet btn-sm">
+            <input type="file" name="photo" accept="image/*" class="visually-hidden" data-autosubmit>
+            {% if recipe.photo_url %}Use my photo{% else %}Add your photo{% endif %}
+        </label>
+        <noscript><button class="btn btn-quiet btn-sm">Upload</button></noscript>
+    </form>
+    {% if recipe.photo_url %}
+    <form method="post" action="{% url 'recipe_photo_upload' recipe.pk %}" data-confirm="Remove this photo?">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button name="remove" value="1" class="btn btn-quiet btn-sm">Remove</button>
+    </form>
+    {% endif %}
+</span>

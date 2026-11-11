@@ -10,11 +10,12 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
-from meals import calendar_sync, kroger, planner
+from meals import calendar_sync, kroger, photos, planner
 from meals.models import (
     MEAL_TYPES, AllowedUser, CartPush, GroceryProduct, HouseholdSettings, MealPlan, MealSwap, PlannedMeal, Recipe,
     week_start_for,
@@ -69,25 +70,47 @@ def generate_week(week_start: date | None = None, regenerate: bool = False) -> M
     week_start = week_start_for(week_start or timezone.localdate())
     plan, _ = MealPlan.objects.get_or_create(week_start=week_start)
     slots = plan_slots(plan)
-
-    if regenerate:
-        for meal in plan.meals.filter(locked=False):
-            _remove_meal(meal)
-    existing = {m.slot: m for m in plan.meals.select_related('recipe')}
-    locked = {slot: m.recipe for slot, m in existing.items()}
-    if all(slot in existing for slot in slots):
+    filled = {m.slot for m in plan.meals.all()}
+    if not regenerate and all(slot in filled for slot in slots):
         return plan
 
-    choices = planner.choose_week(slots, locked)
-    with transaction.atomic():
-        new_meals = [
-            PlannedMeal.objects.create(
-                plan=plan, date=date.fromisoformat(c.date), meal_type=c.meal_type, recipe=planner.resolve_recipe(c),
-                why=c.why[:300])
-            for c in choices
-        ]
-    _sync_calendar(new_meals)
-    return plan
+    _claim_generation(plan)
+    try:
+        if regenerate:
+            for meal in plan.meals.filter(locked=False):
+                _remove_meal(meal)
+        existing = {m.slot: m for m in plan.meals.select_related('recipe')}
+        locked = {slot: m.recipe for slot, m in existing.items()}
+        if all(slot in existing for slot in slots):
+            return plan
+
+        choices = planner.choose_week(slots, locked)
+        with transaction.atomic():
+            new_meals = [
+                PlannedMeal.objects.create(
+                    plan=plan, date=date.fromisoformat(c.date), meal_type=c.meal_type,
+                    recipe=planner.resolve_recipe(c), why=c.why[:300])
+                for c in choices
+            ]
+        _sync_calendar(new_meals)
+        photos.fetch_missing_photos_soon()
+        return plan
+    finally:
+        MealPlan.objects.filter(pk=plan.pk).update(generating_since=None)
+        plan.generating_since = None
+
+
+class PlanBusy(Exception):
+    """This week is already being planned by another request or the weekly job."""
+
+
+def _claim_generation(plan: MealPlan):
+    """Mark `plan` as being generated, atomically, or raise PlanBusy if a live run already holds it."""
+    now = timezone.now()
+    free = Q(generating_since__isnull=True) | Q(generating_since__lt=now - MealPlan.GENERATING_STALE_AFTER)
+    if not MealPlan.objects.filter(free, pk=plan.pk).update(generating_since=now):
+        raise PlanBusy(f'The week of {plan.week_start:%b %-d} is already being planned.')
+    plan.generating_since = now
 
 
 def add_meal(plan: MealPlan, day: date, meal_type: str, user, recipe: Recipe | None = None,
@@ -106,6 +129,7 @@ def add_meal(plan: MealPlan, day: date, meal_type: str, user, recipe: Recipe | N
     meal = PlannedMeal.objects.create(plan=plan, date=day, meal_type=meal_type, recipe=recipe, why=why[:300])
     _set_override(plan, day, meal_type, True)
     _sync_calendar([meal])
+    photos.fetch_missing_photos_soon()
     return meal
 
 
@@ -173,6 +197,7 @@ def replace_with_suggestion(meal: PlannedMeal, user, hint: str = '') -> PlannedM
     """Ask Claude for something else for this meal, guided by the user's hint."""
     choice = planner.choose_replacement(meal, hint)
     recipe = planner.resolve_recipe(choice)
+    photos.fetch_missing_photos_soon()
     return _swap(meal, recipe, choice.why, user, hint)
 
 

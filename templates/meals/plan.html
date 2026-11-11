@@ -31,13 +31,24 @@
 </section>
 {% endif %}
 
+{% if generating %}
+<div class="note text-center mt-3" role="status" data-plan-status="{% url 'plan_status' week_start|date:'Y-m-d' %}">
+    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+    Planning this week… it'll show up here when it's ready.
+</div>
+{% endif %}
+
 {% if not plan or not meals %}
 <div class="note text-center mt-4">
+    {% if generating %}
+    <p class="mb-0">No meals yet; Claude is still picking them.</p>
+    {% else %}
     <p class="mb-3">No meals planned for this week yet.</p>
     <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow">{% csrf_token %}
         <button type="submit" class="btn btn-primary px-4">Plan this week</button>
     </form>
-    {% if plan %}<button type="button" class="btn btn-quiet mt-2" data-bs-toggle="offcanvas" data-bs-target="#add-sheet" aria-controls="add-sheet">Or add one meal</button>{% endif %}
+    {% endif %}
+    {% if plan and not generating %}<button type="button" class="btn btn-quiet mt-2" data-bs-toggle="offcanvas" data-bs-target="#add-sheet" aria-controls="add-sheet">Or add one meal</button>{% endif %}
 </div>
 {% else %}
 <div class="stat-strip mt-3">
@@ -65,6 +76,7 @@
             <span class="dom">{{ meal.date|date:"j" }}</span>{% endifchanged %}
         </div>
         <div class="min-w-0">
+            {% if meal.recipe.photo_url %}<a class="day-thumb" href="{% url 'meal_detail' meal.pk %}" tabindex="-1" aria-hidden="true"><img src="{{ meal.recipe.photo_url }}" alt="" width="76" height="76" loading="lazy"></a>{% endif %}
             <span class="visually-hidden">{{ meal.date|date:"l, F j" }} {{ meal.get_meal_type_display|lower }}:</span>
             {% if show_meal_types %}<span class="meal-type" aria-hidden="true">{{ meal.get_meal_type_display }}</span>{% endif %}
             <a class="day-recipe" href="{% url 'meal_detail' meal.pk %}">{{ meal.recipe.name }}</a>
@@ -130,7 +142,7 @@
         <form method="post" action="{% url 'generate_plan' week_start|date:'Y-m-d' %}" class="slow d-grid"
               data-confirm="Re-pick every unlocked meal this week?">{% csrf_token %}
             <input type="hidden" name="regenerate" value="1">
-            <button type="submit" class="btn btn-outline-secondary">Regenerate unlocked meals</button>
+            <button type="submit" class="btn btn-outline-secondary"{% if generating %} disabled{% endif %}>{% if generating %}Planning…{% else %}Regenerate unlocked meals{% endif %}</button>
         </form>
         <p class="small text-body-secondary mb-0">Locked meals stay put when you regenerate.</p>
     </div>

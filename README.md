@@ -49,6 +49,9 @@ King Soopers cart through the Kroger API.
    - `KROGER_API_BASE` — optional; set to `https://api-ce.kroger.com/v1` while the Kroger app is
      still in the certification environment (default is production, `https://api.kroger.com/v1`)
    - `INTERNAL_API_SECRET` — the same value as `MEAL_PLANNER_SECRET` in Airflow's `.env`
+   - `PIXABAY_API_KEY` — optional, free with a Pixabay account (shown at pixabay.com/api/docs/). New recipes get a stock photo in the
+     background; without it they have none until someone adds their own. To fill in recipes that
+     existed before the key was set, run `docker exec meal_planner python manage.py fetch_recipe_photos`.
 3. **Google Calendar** — put a service account JSON key at
    `/home/michael/apps/meal_planner/secrets/google_service_account.json` (mounted by absolute path).
    The existing gspread service account works if the Calendar API is enabled for its project.

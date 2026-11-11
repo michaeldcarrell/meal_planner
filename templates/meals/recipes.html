@@ -12,6 +12,8 @@
     <div class="section-header"><h2>All recipes</h2><span class="list-row-meta">Score</span></div>
     {% for r in recipes %}
     <a href="{% url 'recipe_detail' r.pk %}" class="list-row{% if r.archived %} is-archived{% endif %}" data-recipe-search="{{ r.name|lower }} {{ r.cuisine|lower }}">
+        <div class="d-flex align-items-center gap-3 min-w-0">
+        {% if r.photo_url %}<img class="list-thumb" src="{{ r.photo_url }}" alt="" width="48" height="48" loading="lazy">{% else %}<span class="list-thumb" aria-hidden="true"></span>{% endif %}
         <div class="min-w-0">
             <div class="list-row-name">{{ r.name }}{% if r.archived %} <span class="tag ms-1">Archived</span>{% endif %}</div>
             <div class="meta mt-1">
@@ -19,6 +21,7 @@
                 {% if r.total_minutes %}<span>{{ r.total_minutes }} min</span>{% endif %}
                 <span>Served {{ r.times }}×</span>
             </div>
+        </div>
         </div>
         <span class="num fw-semibold{% if r.total > 0 %} text-like{% elif r.total < 0 %} text-dislike{% else %} text-dim{% endif %}">{% if r.total > 0 %}+{% endif %}{{ r.total|default:0 }}</span>
     </a>

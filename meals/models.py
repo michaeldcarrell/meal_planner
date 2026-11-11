@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.db import models
 from django.db.models import Case, Sum, Value, When
+from django.urls import reverse
 from django.utils import timezone
 
 
@@ -174,12 +175,27 @@ class Recipe(models.Model):
     instructions = models.TextField(blank=True)
     archived = models.BooleanField(default=False, help_text='Never suggest this recipe again.')
     created_at = models.DateTimeField(auto_now_add=True)
+    # Photo: the image bytes live in RecipePhoto (so list queries never load them); what the pages need to
+    # show one lives here. See meals/photos.py.
+    photo_query = models.CharField(max_length=100, blank=True, help_text='Stock photo search words, from the planner.')
+    photo_searched_at = models.DateTimeField(null=True, blank=True)
+    photo_source = models.CharField(max_length=10, blank=True, choices=[('pixabay', 'Pixabay'), ('upload', 'Uploaded')])
+    photo_credit = models.CharField(max_length=200, blank=True)
+    photo_credit_url = models.URLField(max_length=500, blank=True)
+    photo_updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['name']
 
     def __str__(self):
         return self.name
+
+    @property
+    def photo_url(self) -> str:
+        """The photo's URL (versioned so browsers can cache it), or '' if there is none."""
+        if not self.photo_updated_at:
+            return ''
+        return f"{reverse('recipe_photo', args=[self.pk])}?v={int(self.photo_updated_at.timestamp())}"
 
     @property
     def score(self) -> int:
@@ -233,6 +249,14 @@ def week_start_for(day: date) -> date:
     return day - timedelta(days=(day.weekday() + 1) % 7)
 
 
+class RecipePhoto(models.Model):
+    """A recipe's photo, kept in the database: the container's filesystem doesn't survive a redeploy."""
+    recipe = models.OneToOneField(Recipe, on_delete=models.CASCADE, related_name='photo')
+    image = models.BinaryField()
+    content_type = models.CharField(max_length=50, default='image/jpeg')
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+
+
 class MealPlan(models.Model):
     week_start = models.DateField(unique=True, help_text='The Sunday this plan starts on.')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -240,6 +264,12 @@ class MealPlan(models.Model):
     # This week's changes to the household schedule: {"2026-10-26:dinner": false, "2026-10-31:lunch": true}.
     # False is a meal someone removed (never re-planned), true one they added beyond the schedule.
     slot_overrides = models.JSONField(default=dict, blank=True)
+    # Set while Claude is planning this week (by whichever request or job started it), so the week page
+    # can show that and a second "Plan this week" doesn't start another run. See services.generate_week.
+    generating_since = models.DateTimeField(null=True, blank=True)
+
+    # Past this, a run is assumed dead (gunicorn kills a worker at 300s, so `finally` never ran).
+    GENERATING_STALE_AFTER = timedelta(minutes=10)
 
     class Meta:
         ordering = ['-week_start']
@@ -250,6 +280,10 @@ class MealPlan(models.Model):
     @property
     def week_end(self) -> date:
         return self.week_start + timedelta(days=6)
+
+    @property
+    def is_generating(self) -> bool:
+        return bool(self.generating_since) and timezone.now() - self.generating_since < self.GENERATING_STALE_AFTER
 
     @property
     def days(self) -> list[date]:

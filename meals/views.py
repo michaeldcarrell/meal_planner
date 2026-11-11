@@ -9,17 +9,17 @@ from django.contrib import messages
 from django.contrib.auth import logout
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Sum
-from django.http import Http404, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from meals import calendar_sync, kroger, services
+from meals import calendar_sync, kroger, photos, services
 from meals.models import (
     COOK_TIMES, CUISINES, MEAL_SCHEDULE_PRESETS, MEAL_STYLES, MEAL_TYPES, PLAN_WEEKDAYS, PROTEIN_LEVELS, PROTEINS, HouseholdSettings, KrogerAuth, MealPlan,
-    MemberPreferences, PlannedMeal, Rating, Recipe, week_start_for,
+    MemberPreferences, PlannedMeal, Rating, Recipe, RecipePhoto, week_start_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,7 @@ class PlanView(LoginRequiredMixin, View):
         return render(request, 'meals/plan.html', {
             'setup_steps': _setup_steps(),
             'plan': plan,
+            'generating': bool(plan and plan.is_generating),
             'week_start': start,
             'week_end': start + timedelta(days=6),
             'today': timezone.localdate(),
@@ -110,10 +111,19 @@ class GeneratePlan(LoginRequiredMixin, View):
         try:
             services.generate_week(start, regenerate=regenerate)
             messages.success(request, 'Plan regenerated.' if regenerate else 'Plan created.')
+        except services.PlanBusy:
+            messages.info(request, 'This week is already being planned; it will show up here when it\'s done.')
         except Exception as e:
             logger.exception('generate_week failed')
             messages.error(request, f'Could not generate the plan: {e}')
         return redirect('plan', week_start)
+
+
+class PlanStatus(LoginRequiredMixin, View):
+    """Polled by the week page while a plan is being generated, so it can reload when it's ready."""
+    def get(self, request, week_start):
+        plan = _plan_or_404(week_start)
+        return JsonResponse({'generating': plan.is_generating})
 
 
 class EmailPlan(LoginRequiredMixin, View):
@@ -253,6 +263,32 @@ class RecipeDetail(LoginRequiredMixin, View):
             'votes': recipe.ratings.select_related('user'),
             'history': recipe.planned_meals.order_by('-date')[:10],
         })
+
+
+class RecipePhotoView(LoginRequiredMixin, View):
+    """The photo itself. Its URL carries a version (Recipe.photo_url), so browsers can keep it."""
+    def get(self, request, pk):
+        photo = get_object_or_404(RecipePhoto, recipe_id=pk)
+        response = HttpResponse(bytes(photo.image), content_type=photo.content_type)
+        response['Cache-Control'] = 'private, max-age=31536000, immutable'
+        return response
+
+
+class RecipePhotoUpload(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        recipe = get_object_or_404(Recipe, pk=pk)
+        if request.POST.get('remove'):
+            photos.remove_photo(recipe)
+            messages.success(request, 'Photo removed.')
+        elif upload := request.FILES.get('photo'):
+            try:
+                photos.save_upload(recipe, upload, request.user)
+                messages.success(request, 'Photo added.')
+            except photos.PhotoError as e:
+                messages.error(request, str(e))
+        else:
+            messages.error(request, 'Choose a photo first.')
+        return _back(request, f'/recipes/{recipe.pk}/')
 
 
 class ToggleArchive(LoginRequiredMixin, View):

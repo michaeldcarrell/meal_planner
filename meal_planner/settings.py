@@ -162,6 +162,9 @@ KROGER_API_BASE = config('KROGER_API_BASE', default='https://api.kroger.com/v1')
 # Shared secret Airflow sends to the /internal/ endpoints.
 INTERNAL_API_SECRET = config('INTERNAL_API_SECRET', default='')
 
+# Pixabay (pixabay.com/api/docs/) for recipe photos; without a key recipes just have no stock photo.
+PIXABAY_API_KEY = config('PIXABAY_API_KEY', default='')
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
