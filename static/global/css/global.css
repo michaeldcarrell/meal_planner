@@ -1465,6 +1465,14 @@ figure.recipe-hero {
     gap: 8px;
 }
 
+.move-week {
+    margin: 18px 0 8px;
+}
+
+.move-week:first-of-type {
+    margin-top: 4px;
+}
+
 .move-day {
     display: flex;
     align-items: center;

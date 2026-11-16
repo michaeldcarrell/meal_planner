@@ -143,11 +143,12 @@ def remove_meal(meal: PlannedMeal):
 
 
 def move_meal(meal: PlannedMeal, day: date) -> PlannedMeal:
-    """Move a meal to another day of its week; if that day already has this kind of meal, the two
-    trade places. Calendar events move with them. Returns the row now on `day`."""
+    """Move a meal to another day. Within its week, a meal already on that day trades places with it;
+    into another week (e.g. one that didn't get cooked), it replaces whatever that day has. Calendar
+    events move with them. Returns the row now on `day`."""
     plan = meal.plan
     if day not in plan.days:
-        raise ValueError(f'{day} is not in the week of {plan.week_start}.')
+        return _move_to_other_week(meal, day)
     days = (day - meal.date).days
     if not days:
         return meal
@@ -177,6 +178,30 @@ def move_meal(meal: PlannedMeal, day: date) -> PlannedMeal:
         except Exception:
             logger.exception('Calendar move failed for meal %s', m.pk)
     return moved
+
+
+def _move_to_other_week(meal: PlannedMeal, day: date) -> PlannedMeal:
+    """Move `meal` into the week containing `day` (today or later), replacing the meal of its type
+    already there. The day it leaves isn't re-planned, and the replaced meal is just removed (its
+    recipe stays in the library and isn't counted as a swap)."""
+    if day < timezone.localdate():
+        raise ValueError('Meals can only move to another week from today on.')
+    old_plan, old_date = meal.plan, meal.date
+    target, _ = MealPlan.objects.get_or_create(household=old_plan.household, week_start=week_start_for(day))
+    if target.is_generating:
+        raise PlanBusy(f'The week of {target.week_start:%b %-d} is being planned; try again when it\'s done.')
+    replaced = target.meals.filter(date=day, meal_type=meal.meal_type).first()
+    if replaced:
+        _remove_meal(replaced)
+    meal.plan, meal.date = target, day
+    meal.save(update_fields=['plan', 'date'])
+    _set_override(old_plan, old_date, meal.meal_type, False)
+    _set_override(target, day, meal.meal_type, True)
+    try:
+        calendar_sync.move_meal_event(meal, (day - old_date).days)
+    except Exception:
+        logger.exception('Calendar move failed for meal %s', meal.pk)
+    return meal
 
 
 def _remove_meal(meal: PlannedMeal):

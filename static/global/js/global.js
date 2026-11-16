@@ -41,9 +41,10 @@ document.querySelectorAll('input[type=file][data-autosubmit]').forEach(input => 
     input.form.requestSubmit();
 }));
 
-// Forms that ask before submitting (e.g. regenerate the week).
-document.querySelectorAll('form[data-confirm]').forEach(form => form.addEventListener('submit', event => {
-    if (!confirm(form.dataset.confirm)) {
+// Forms (or one of their buttons) that ask before submitting (e.g. regenerate the week, replace a meal).
+document.querySelectorAll('form[data-confirm], form:has([data-confirm])').forEach(form => form.addEventListener('submit', event => {
+    const question = event.submitter?.dataset.confirm ?? form.dataset.confirm;
+    if (question && !confirm(question)) {
         event.preventDefault();
         event.stopImmediatePropagation();
     }

@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from unittest import mock
 
 import requests
@@ -238,6 +238,48 @@ class PlanServiceTests(TestCase):
         meal.refresh_from_db()
         self.assertEqual(meal.date, SUNDAY)
         self.assertEqual(self.client.post(f'/meals/{meal.pk}/move/', {'date': 'soon'}).status_code, 400)
+
+    @mock.patch('meals.calendar_sync.move_meal_event')
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_move_a_leftover_meal_into_another_week(self, choose, move_event, delete_event, sync):
+        """Last week's uncooked Friday dinner replaces next Monday's."""
+        this_week = week_start_for(timezone.localdate())
+        last = services.generate_week(self.home, this_week - timedelta(days=7))
+        upcoming = services.generate_week(self.home, this_week + timedelta(days=7))
+        friday, monday = last.week_start + timedelta(days=5), upcoming.week_start + timedelta(days=1)
+        leftover = last.meals.get(date=friday)
+        leftover.locked = True
+        leftover.save()
+        replaced = upcoming.meals.get(date=monday)
+
+        self.client.force_login(self.user)
+        page = self.client.get(f'/meals/{leftover.pk}/').content.decode()
+        self.assertIn('Replace Dish Mon', page)
+        self.assertIn(f'data-confirm="Replace Dish Mon on Monday, {monday:%b} {monday.day} with Dish Fri?', page)
+        self.assertLess(page.index('>This week<'), page.index('>Last week<'))  # leftovers open on this week
+        response = self.client.post(f'/meals/{leftover.pk}/move/', {'date': monday.isoformat()})
+        self.assertRedirects(response, f'/plan/{upcoming.week_start}/#meal-{leftover.pk}', fetch_redirect_response=False)
+
+        leftover.refresh_from_db()
+        self.assertEqual((leftover.plan, leftover.date, leftover.locked), (upcoming, monday, True))
+        self.assertFalse(PlannedMeal.objects.filter(pk=replaced.pk).exists())
+        self.assertEqual([(c.args[0].recipe.name, c.args[0].date) for c in delete_event.call_args_list],
+                         [(replaced.recipe.name, monday)])
+        move_event.assert_called_once_with(leftover, (monday - friday).days)
+        self.assertFalse(MealSwap.objects.exists())  # being bumped isn't a dislike
+        # Neither week plans around the move: Friday stays empty, Monday keeps the leftover.
+        services.generate_week(self.home, last.week_start, regenerate=True)
+        services.generate_week(self.home, upcoming.week_start, regenerate=True)
+        self.assertFalse(last.meals.filter(date=friday).exists())
+        self.assertEqual(upcoming.meals.get(date=monday).recipe.name, 'Dish Fri')
+
+        # Into a day of another week with nothing planned: nothing is replaced. Into the past: refused.
+        delete_event.reset_mock()
+        services.move_meal(last.meals.get(date=last.week_start + timedelta(days=4)), upcoming.week_start + timedelta(days=6))
+        delete_event.assert_not_called()
+        self.assertEqual(upcoming.meals.count(), 6)
+        with self.assertRaises(ValueError):
+            services.move_meal(upcoming.meals.get(date=monday), last.week_start + timedelta(days=1))
 
     def test_resolve_recipe_reuses_known_recipe(self, *_):
         known = Recipe.objects.create(household=self.home, name='Tacos')

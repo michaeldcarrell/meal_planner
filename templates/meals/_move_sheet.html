@@ -8,14 +8,20 @@
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
     </div>
     <div class="offcanvas-body pt-0">
-        <form method="post" action="{% url 'move_meal' meal.pk %}" class="move-days">{% csrf_token %}
-            {% for day, there in meal.move_options %}
-            <button name="date" value="{{ day|date:'Y-m-d' }}" class="move-day">
-                <span class="move-day-date">{{ day|date:"D j" }}</span>
-                <span class="move-day-what">{% if there %}Trade with {{ there.recipe.name }}{% else %}No {{ meal.get_meal_type_display|lower }} yet{% endif %}</span>
-            </button>
+        <form method="post" action="{% url 'move_meal' meal.pk %}">{% csrf_token %}
+            {% for week in meal.move_options %}
+            <h3 class="eyebrow move-week">{{ week.label }}</h3>
+            <div class="move-days">
+                {% for day, there in week.days %}
+                <button name="date" value="{{ day|date:'Y-m-d' }}" class="move-day"
+                        {% if there and not week.same_week %}data-confirm="Replace {{ there.recipe.name }} on {{ day|date:'l, M j' }} with {{ meal.recipe.name }}? {{ there.recipe.name }} comes off that week; the recipe stays in your library."{% endif %}>
+                    <span class="move-day-date">{{ day|date:"D j" }}</span>
+                    <span class="move-day-what">{% if there %}{% if week.same_week %}Trade with{% else %}Replace{% endif %} {{ there.recipe.name }}{% else %}No {{ meal.get_meal_type_display|lower }} yet{% endif %}</span>
+                </button>
+                {% endfor %}
+            </div>
             {% endfor %}
         </form>
-        <p class="small text-body-secondary mt-3 mb-0">The calendar event moves too, keeping its time.</p>
+        <p class="small text-body-secondary mt-3 mb-0">The calendar event moves too, keeping its time. In its own week a meal trades places; moved into another week, it replaces that day's {{ meal.get_meal_type_display|lower }}.</p>
     </div>
 </div>

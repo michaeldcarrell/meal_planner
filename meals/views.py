@@ -122,10 +122,45 @@ def _setup_steps(home: Household) -> list[dict] | None:
     return None if all(step['done'] for step in steps) else steps
 
 
-def _move_options(meal: PlannedMeal, meals) -> list[tuple]:
-    """(day, meal already there or None) for every other day of the meal's week."""
-    taken = {m.date: m for m in meals if m.meal_type == meal.meal_type}
-    return [(day, taken.get(day)) for day in meal.plan.days if day != meal.date]
+def _week_label(start: date, this_week: date) -> str:
+    return {this_week: 'This week', this_week + timedelta(days=7): 'Next week',
+            this_week - timedelta(days=7): 'Last week'}.get(start, f'Week of {start:%b %-d}')
+
+
+def _move_weeks_for(week_start: date) -> list[date]:
+    """The other weeks a meal from `week_start` can move into: the week after it, this week and next."""
+    this_week = week_start_for(timezone.localdate())
+    return sorted({week_start + timedelta(days=7), this_week, this_week + timedelta(days=7)} - {week_start})
+
+
+def _meals_by_week(household, starts) -> dict[date, list[PlannedMeal]]:
+    by_week = {start: [] for start in starts}
+    for m in PlannedMeal.objects.filter(plan__household=household, plan__week_start__in=starts).select_related(
+            'recipe', 'plan'):
+        by_week[m.plan.week_start].append(m)
+    return by_week
+
+
+def _move_options(meal: PlannedMeal, by_week: dict[date, list[PlannedMeal]]) -> list[dict]:
+    """Where `meal` can move, grouped by week: {label, same_week, days: [(day, meal already there or None)]}.
+
+    Its own week offers every other day (a meal there trades places); other weeks (`by_week`, which
+    includes its own) offer today onward (a meal there is replaced). A week that's already over is
+    listed last, so a leftover meal from last week opens on this week.
+    """
+    today = timezone.localdate()
+    this_week = week_start_for(today)
+    own = meal.plan.week_start
+    groups = []
+    for start in sorted(by_week, key=lambda s: (s + timedelta(days=6) < today, s)):
+        same_week = start == own
+        days = [start + timedelta(days=i) for i in range(7)]
+        days = [d for d in days if d != meal.date] if same_week else [d for d in days if d >= today]
+        taken = {m.date: m for m in by_week[start] if m.meal_type == meal.meal_type}
+        if days:
+            groups.append({'label': _week_label(start, this_week), 'same_week': same_week,
+                           'days': [(d, taken.get(d)) for d in days]})
+    return groups
 
 
 class PlanView(HouseholdMixin, View):
@@ -140,9 +175,10 @@ class PlanView(HouseholdMixin, View):
             meal.my_rating = meal.recipe.rating_for(request.user)
             meal.votes = list(meal.recipe.ratings.select_related('user'))
         favorites = list(_favorites(request.household))
+        by_week = {start: meals, **_meals_by_week(request.household, _move_weeks_for(start))}
         for meal in meals:
             meal.swap_favorites = [r for r in favorites if r.pk != meal.recipe_id]
-            meal.move_options = _move_options(meal, meals)
+            meal.move_options = _move_options(meal, by_week)
         minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
         return render(request, 'meals/plan.html', {
             'setup_steps': _setup_steps(request.household),
@@ -197,7 +233,8 @@ class EmailPlan(HouseholdMixin, View):
 class MealDetail(HouseholdMixin, View):
     def get(self, request, pk):
         meal = _meal_or_404(request, pk, follow=True)
-        meal.move_options = _move_options(meal, meal.plan.meals.select_related('recipe'))
+        own = meal.plan.week_start
+        meal.move_options = _move_options(meal, _meals_by_week(request.household, [own, *_move_weeks_for(own)]))
         return render(request, 'meals/meal_detail.html', {
             'meal': meal,
             'recipe': meal.recipe,
@@ -279,14 +316,21 @@ class MoveMeal(HouseholdMixin, View):
             day = date.fromisoformat(request.POST.get('date', ''))
         except ValueError:
             return HttpResponseBadRequest()
-        name, from_day = meal.recipe.name, meal.date
+        name, from_day, from_week = meal.recipe.name, meal.date, meal.plan.week_start
+        other_week = week_start_for(day) != from_week
+        replaced = (PlannedMeal.objects.filter(plan__household=request.household, date=day, meal_type=meal.meal_type)
+                    .select_related('recipe').first() if other_week else None)
         try:
             moved = services.move_meal(meal, day)
-        except ValueError as e:
+        except (ValueError, services.PlanBusy) as e:
             messages.error(request, str(e))
-            return redirect('plan', meal.plan.week_start.isoformat())
-        messages.success(request, f'Moved {name} from {from_day:%A} to {day:%A}.')
-        return redirect(f'/plan/{meal.plan.week_start.isoformat()}/#meal-{moved.pk}')
+            return redirect('plan', from_week.isoformat())
+        if other_week:
+            note = f', replacing {replaced.recipe.name}' if replaced else ''
+            messages.success(request, f'Moved {name} from {from_day:%a %b %-d} to {day:%a %b %-d}{note}.')
+        else:
+            messages.success(request, f'Moved {name} from {from_day:%A} to {day:%A}.')
+        return redirect(f'/plan/{moved.plan.week_start.isoformat()}/#meal-{moved.pk}')
 
 
 class RemoveMeal(HouseholdMixin, View):
