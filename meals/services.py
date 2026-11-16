@@ -156,7 +156,7 @@ def move_meal(meal: PlannedMeal, day: date) -> PlannedMeal:
     if other:
         # Trade what's planned rather than the dates, so each row keeps its (date, meal_type) slot
         # and the unique constraint holds throughout.
-        fields = ['recipe', 'why', 'locked', 'calendar_event_id']
+        fields = ['recipe', 'why', 'locked', 'calendar_event_id', 'servings']
         for field in fields:
             mine, theirs = getattr(meal, field), getattr(other, field)
             setattr(meal, field, theirs)
@@ -204,6 +204,17 @@ def _move_to_other_week(meal: PlannedMeal, day: date) -> PlannedMeal:
     return meal
 
 
+def set_servings(meal: PlannedMeal, servings: int | None) -> PlannedMeal:
+    """Cook `servings` of this meal (None: what the recipe makes). Ingredients, the grocery list and the
+    calendar event scale to match."""
+    if servings is not None and not 1 <= servings <= PlannedMeal.MAX_SERVINGS:
+        raise ValueError(f'Servings must be between 1 and {PlannedMeal.MAX_SERVINGS}.')
+    meal.servings = None if servings == meal.recipe.servings else servings
+    meal.save(update_fields=['servings'])
+    _sync_calendar([meal])
+    return meal
+
+
 def _remove_meal(meal: PlannedMeal):
     try:
         calendar_sync.delete_meal_event(meal)
@@ -247,10 +258,11 @@ def grocery_list(plan: MealPlan) -> list[dict]:
     staples = HouseholdSettings.load(plan.household).pantry_staple_set
     merged: OrderedDict[str, dict] = OrderedDict()
     for meal in plan.meals.select_related('recipe'):
-        for ing in meal.recipe.ingredients:
+        for ing in meal.ingredients:
             key = _normalize(ing.get('grocery_item') or ing['name'])
             entry = merged.setdefault(key, {'grocery_item': key, 'uses': [], 'pantry_staple': False})
-            entry['uses'].append(f"{ing.get('quantity', '')} {ing['name']} ({meal.recipe.name})".strip())
+            label = f'{meal.recipe.name}, serves {meal.serving_count}' if meal.is_scaled else meal.recipe.name
+            entry['uses'].append(f"{ing.get('quantity', '')} {ing['name']} ({label})".strip())
             entry['pantry_staple'] = entry['pantry_staple'] or bool(ing.get('pantry_staple')) or key in staples
     return sorted(merged.values(), key=lambda e: (e['pantry_staple'], e['grocery_item']))
 

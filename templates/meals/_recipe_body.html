@@ -15,9 +15,27 @@
 <h1 class="detail-title">{{ recipe.name }}</h1>
 <div class="meta mt-2">
     <span>{{ recipe.total_minutes|default:"?" }} min</span>
-    <span>Serves {{ recipe.servings|default:"?" }}</span>
+    {% if not meal or not recipe.servings %}<span>Serves {{ recipe.servings|default:"?" }}</span>{% endif %}
     {% if recipe.cuisine %}<span>{{ recipe.cuisine }}</span>{% endif %}
 </div>
+{% if meal and recipe.servings %}
+{% with count=meal.serving_count %}
+<form method="post" action="{% url 'set_servings' meal.pk %}" class="servings-control mt-3">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <span class="servings-label" id="servings-{{ meal.pk }}">Servings</span>
+    <div class="servings-stepper" role="group" aria-labelledby="servings-{{ meal.pk }}">
+        <button name="servings" value="{{ count|add:'-1' }}" class="icon-button" aria-label="Fewer servings" {% if count <= 1 %}disabled{% endif %}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg>
+        </button>
+        <output class="servings-count num" aria-live="polite">{{ count }}</output>
+        <button name="servings" value="{{ count|add:'1' }}" class="icon-button" aria-label="More servings" {% if count >= meal.MAX_SERVINGS %}disabled{% endif %}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        </button>
+    </div>
+    {% if meal.is_scaled %}<button name="servings" value="" class="btn btn-quiet">Reset to {{ recipe.servings }}</button>{% endif %}
+</form>
+{% endwith %}
+{% endif %}
 {% if recipe.summary %}<p class="mt-3 mb-0">{{ recipe.summary }}</p>{% endif %}
 
 <section class="section">
@@ -48,8 +66,8 @@
 
 <div class="recipe-columns">
     <section class="section">
-        <div class="section-header"><h2>Ingredients</h2><span class="list-row-meta num">{{ recipe.ingredients|length }}</span></div>
-        <ul class="ingredient-list">{% for i in recipe.ingredients %}<li><span class="qty">{{ i.quantity }}</span><span>{{ i.name }}</span></li>{% endfor %}</ul>
+        <div class="section-header"><h2>Ingredients</h2><span class="list-row-meta num">{% if meal.is_scaled %}For {{ meal.serving_count }} · recipe makes {{ recipe.servings }}{% else %}{{ recipe.ingredients|length }}{% endif %}</span></div>
+        <ul class="ingredient-list">{% for i in meal.ingredients|default:recipe.ingredients %}<li><span class="qty">{{ i.quantity }}</span><span>{{ i.name }}</span></li>{% endfor %}</ul>
     </section>
     <section class="section">
         {% with steps=recipe.steps %}

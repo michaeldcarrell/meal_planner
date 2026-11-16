@@ -1460,6 +1460,44 @@ figure.recipe-hero {
 }
 
 /* Move sheet: one button per other day of the week. */
+/* Meal page: how many servings to cook. */
+.servings-control {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+}
+
+.servings-label {
+    font-family: var(--mp-font-mono);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+}
+
+.servings-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px;
+    border: 1px solid var(--mp-line);
+    border-radius: 8px;
+    background: var(--mp-surface);
+}
+
+.servings-stepper .icon-button:disabled {
+    opacity: 0.35;
+}
+
+.servings-count {
+    min-width: 2.5ch;
+    text-align: center;
+    font-family: var(--mp-font-mono);
+    font-size: 15px;
+    font-weight: 600;
+}
+
 .move-days {
     display: grid;
     gap: 8px;

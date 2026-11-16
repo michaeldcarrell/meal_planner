@@ -1,5 +1,6 @@
 import json
 from datetime import date, timedelta
+from fractions import Fraction
 from unittest import mock
 
 import requests
@@ -8,7 +9,7 @@ from django.core import mail
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
-from meals import calendar_sync, photos, planner, services
+from meals import calendar_sync, photos, planner, quantities, services
 from meals.models import (
     AllowedUser, GroceryProduct, Household, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, MealSwap,
     Membership, PlannedMeal, Rating, Recipe, RecipePhoto, week_start_for,
@@ -281,6 +282,46 @@ class PlanServiceTests(TestCase):
         with self.assertRaises(ValueError):
             services.move_meal(upcoming.meals.get(date=monday), last.week_start + timedelta(days=1))
 
+    @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+    def test_servings_scale_the_meal_groceries_and_calendar(self, choose, delete_event, sync):
+        plan = services.generate_week(self.home, SUNDAY)
+        meal = plan.meals.get(date=date(2026, 10, 26))  # 'Dish Mon': 1 yellow onion, 1 tsp salt; serves 4
+        self.client.force_login(self.user)
+        page = self.client.get(f'/meals/{meal.pk}/')
+        self.assertContains(page, 'aria-label="More servings"')
+        self.assertContains(page, '<output class="servings-count num" aria-live="polite">4</output>', html=False)
+
+        sync.reset_mock()
+        response = self.client.post(f'/meals/{meal.pk}/servings/', {'servings': '6', 'next': f'/meals/{meal.pk}/'})
+        self.assertRedirects(response, f'/meals/{meal.pk}/', fetch_redirect_response=False)
+        meal.refresh_from_db()
+        self.assertEqual((meal.servings, meal.serving_count, meal.scale), (6, 6, Fraction(3, 2)))
+        sync.assert_called_once_with(meal)
+        page = self.client.get(f'/meals/{meal.pk}/')
+        self.assertContains(page, '<span class="qty">1 1/2 tsp</span>', html=False)
+        self.assertContains(page, 'For 6 · recipe makes 4')
+        self.assertContains(page, 'Reset to 4')
+        self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Serves 6')
+        self.assertContains(self.client.get(f'/recipes/{meal.recipe_id}/'), '<span class="qty">1 tsp</span>', html=False)
+        onion = next(i for i in services.grocery_list(plan) if i['grocery_item'] == 'yellow onion')
+        self.assertIn('1 1/2 yellow onion (Dish Mon, serves 6)', onion['uses'])
+        description = calendar_sync._event_content(meal)['description']
+        self.assertIn('• 1 1/2 tsp salt', description)
+        self.assertIn('serves 6', description)
+
+        # Trading days takes the servings along; resetting goes back to the recipe's own.
+        with mock.patch('meals.calendar_sync.move_meal_event'):
+            moved = services.move_meal(meal, date(2026, 10, 27))
+        self.assertEqual((moved.recipe.name, moved.servings), ('Dish Mon', 6))
+        self.client.post(f'/meals/{moved.pk}/servings/', {'servings': ''})
+        moved.refresh_from_db()
+        self.assertIsNone(moved.servings)
+        self.client.post(f'/meals/{moved.pk}/servings/', {'servings': '4'})  # same as the recipe: stored as blank
+        moved.refresh_from_db()
+        self.assertIsNone(moved.servings)
+        for bad in ('0', '25', 'lots'):
+            self.assertEqual(self.client.post(f'/meals/{moved.pk}/servings/', {'servings': bad}).status_code, 400)
+
     def test_resolve_recipe_reuses_known_recipe(self, *_):
         known = Recipe.objects.create(household=self.home, name='Tacos')
         choice = planner.MealChoice(date='2026-10-26', meal_type='dinner', existing_recipe_id=known.pk, new_recipe=None,
@@ -491,6 +532,31 @@ class PlanServiceTests(TestCase):
         self.assertEqual((household.kroger_location_id, household.kroger_location_name),
                          ('62000123', 'King Soopers - Arapahoe'))
         self.assertEqual(self.client.post('/settings/store/', {'location_id': '../x'}).status_code, 400)
+
+
+class ScaleQuantityTests(TestCase):
+    def check(self, factor, cases):
+        for text, expected in cases:
+            self.assertEqual(quantities.scale_quantity(text, factor), expected, text)
+
+    def test_one_and_a_half(self):
+        self.check(Fraction(6, 4), [
+            ('1 1/2 cups', '2 1/4 cups'), ('1/3 cup', '1/2 cup'), ('1-2 tsp', '1 1/2-3 tsp'), ('12', '18'),
+            ('1.5 cups uncooked', '2.25 cups uncooked'), ('1 can (13.5 oz)', '1 1/2 cans (13.5 oz)'),
+            ('2 cans (15 oz each)', '3 cans (15 oz each)'), ('4 fillets (1.5 lb)', '6 fillets (2.25 lb)'),
+            ('2 large (about 1.5 lb)', '3 large (about 2.25 lb)'), ('1 loaf', '1 1/2 loaves'), ('½ cup', '3/4 cup'),
+            ('1 1/4 tsp, divided', '1 7/8 tsp, divided'),
+        ])
+
+    def test_half_goes_back_to_singular(self):
+        self.check(Fraction(1, 2), [
+            ('2 cloves', '1 clove'), ('2 pouches (8.5 oz each)', '1 pouch (8.5 oz each)'), ('1 1/2 cups', '3/4 cup'),
+            ('5 cups (about 2 crowns)', '2 1/2 cups (about 1 crown)'), ('1 bag (14 oz)', '1/2 bag (14 oz)'),
+        ])
+
+    def test_left_alone(self):
+        self.check(Fraction(2), [('to taste', 'to taste'), ('', ''), ('a pinch', 'a pinch')])
+        self.check(1, [('1 1/2 cups', '1 1/2 cups')])
 
 
 class RecipeStepsTests(TestCase):

@@ -1,5 +1,6 @@
 import re
 from datetime import date, timedelta
+from fractions import Fraction
 
 from django.conf import settings
 from django.db import models
@@ -372,6 +373,10 @@ class PlannedMeal(models.Model):
     why = models.CharField(max_length=300, blank=True, help_text="Claude's one-line reason for the pick.")
     locked = models.BooleanField(default=False, help_text='Keep this meal when the week is regenerated.')
     calendar_event_id = models.CharField(max_length=255, blank=True)
+    servings = models.PositiveSmallIntegerField(
+        null=True, blank=True, help_text='Servings to cook this time; blank means what the recipe makes.')
+
+    MAX_SERVINGS = 24
 
     class Meta:
         ordering = ['date', Case(*(When(meal_type=key, then=Value(i)) for i, (key, _) in enumerate(MEAL_TYPES)))]
@@ -383,6 +388,28 @@ class PlannedMeal(models.Model):
     @property
     def slot(self) -> tuple:
         return self.date, self.meal_type
+
+    @property
+    def serving_count(self) -> int | None:
+        return self.servings or self.recipe.servings
+
+    @property
+    def scale(self) -> Fraction:
+        """How much of the recipe to make: servings asked for over servings it makes (1 if either is unknown)."""
+        if self.servings and self.recipe.servings:
+            return Fraction(self.servings, self.recipe.servings)
+        return Fraction(1)
+
+    @property
+    def is_scaled(self) -> bool:
+        return self.scale != 1
+
+    @property
+    def ingredients(self) -> list[dict]:
+        """The recipe's ingredients with quantities scaled to this meal's servings."""
+        from meals.quantities import scale_quantity
+        scale = self.scale
+        return [{**i, 'quantity': scale_quantity(i.get('quantity', ''), scale)} for i in self.recipe.ingredients]
 
 
 class MealSwap(models.Model):

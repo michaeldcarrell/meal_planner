@@ -49,11 +49,11 @@ def _service():
 def _event_content(meal: PlannedMeal) -> dict:
     """What the app owns on an event: the title, description and link back. Never the time."""
     recipe = meal.recipe
-    ingredients = '\n'.join(f"• {i['quantity']} {i['name']}" for i in recipe.ingredients)
+    ingredients = '\n'.join(f"• {i['quantity']} {i['name']}" for i in meal.ingredients)
     link = settings.APP_BASE_URL + reverse('meal_detail', args=[meal.pk])
     description = (
         f"{recipe.summary}\n\n"
-        f"⏱ {recipe.total_minutes or '?'} min\n\n"
+        f"⏱ {recipe.total_minutes or '?'} min · serves {meal.serving_count or '?'}\n\n"
         f"Ingredients:\n{ingredients}\n\n"
         f"Instructions:\n{recipe.instructions}\n\n"
         f"Rate or replace: {link}"

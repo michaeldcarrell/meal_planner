@@ -333,6 +333,17 @@ class MoveMeal(HouseholdMixin, View):
         return redirect(f'/plan/{moved.plan.week_start.isoformat()}/#meal-{moved.pk}')
 
 
+class SetServings(HouseholdMixin, View):
+    def post(self, request, pk):
+        meal = _meal_or_404(request, pk)
+        value = request.POST.get('servings', '').strip()
+        try:
+            services.set_servings(meal, int(value) if value else None)
+        except ValueError:
+            return HttpResponseBadRequest()
+        return _back(request, f'/meals/{meal.pk}/')
+
+
 class RemoveMeal(HouseholdMixin, View):
     def post(self, request, pk):
         meal = _meal_or_404(request, pk)
