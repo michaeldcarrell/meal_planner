@@ -179,6 +179,9 @@ class PlanView(HouseholdMixin, View):
         for meal in meals:
             meal.swap_favorites = [r for r in favorites if r.pk != meal.recipe_id]
             meal.move_options = _move_options(meal, by_week)
+        ordered = services.ordered_meal_ids(services.grocery_list(plan)) if plan and plan.cart_pushes.exists() else set()
+        for meal in meals:
+            meal.ingredients_ordered = meal.pk in ordered
         minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
         return render(request, 'meals/plan.html', {
             'setup_steps': _setup_steps(request.household),
@@ -415,12 +418,29 @@ class ToggleArchive(HouseholdMixin, View):
         return redirect('recipe_detail', pk)
 
 
+def _meal_filter(request, plan: MealPlan) -> PlannedMeal | None:
+    """The meal picked with ?meal=<id> on the grocery list, if it's in this week."""
+    wanted = request.GET.get('meal', '')
+    return plan.meals.select_related('recipe').filter(pk=wanted).first() if wanted.isdigit() else None
+
+
 class Groceries(HouseholdMixin, View):
     def get(self, request, week_start):
         plan = _plan_or_404(request, week_start)
+        selected = _meal_filter(request, plan)
+        all_items = services.grocery_list(plan)
+        ordered = services.ordered_meal_ids(all_items)
+        meals = list(plan.meals.select_related('recipe'))
+        for meal in meals:
+            meal.ingredients_ordered = meal.pk in ordered
+        items = [i for i in all_items if not selected or selected.pk in i['meal_ids']]
         return render(request, 'meals/groceries.html', {
             'plan': plan,
-            'items': services.grocery_list(plan),
+            'items': items,
+            'to_buy': sum(1 for i in items if not i['pantry_staple'] and not i['ordered']),
+            'meals': meals,
+            'selected': selected,
+            'show_meal_types': any(m.meal_type != 'dinner' for m in meals),
             'kroger_connected': kroger.is_connected(request.household),
             'store_set': bool(HouseholdSettings.load(request.household).kroger_location_id),
             'last_push': plan.cart_pushes.order_by('-created_at').first(),
@@ -429,19 +449,24 @@ class Groceries(HouseholdMixin, View):
     def post(self, request, week_start):
         plan = _plan_or_404(request, week_start)
         items = request.POST.getlist('item')
+        selected = _meal_filter(request, plan)
+        back = f"/plan/{week_start}/groceries/{f'?meal={selected.pk}' if selected else ''}"
         if not items:
             messages.error(request, 'Nothing selected.')
-            return redirect('groceries', week_start)
+            return redirect(back)
         try:
             push = services.push_to_cart(plan, items, request.user)
             added = sum(1 for r in push.results if r['status'] == 'added')
-            messages.success(request, f'Added {added} of {len(items)} items to your King Soopers cart.')
+            ordered = services.ordered_meal_ids(services.grocery_list(plan))
+            done = [m.recipe.name for m in plan.meals.select_related('recipe') if m.pk in ordered]
+            note = f" Ingredients ordered for {', '.join(done)}." if done else ''
+            messages.success(request, f'Added {added} of {len(items)} items to your King Soopers cart.{note}')
         except kroger.KrogerNotConnected:
             messages.error(request, 'Connect your King Soopers account first.')
         except Exception as e:
             logger.exception('push_to_cart failed')
             messages.error(request, f'Could not fill the cart: {e}')
-        return redirect('groceries', week_start)
+        return redirect(back)
 
 
 class CurrentGroceries(HouseholdMixin, View):

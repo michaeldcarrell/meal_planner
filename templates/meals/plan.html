@@ -84,6 +84,7 @@
                 <span>{{ meal.recipe.total_minutes|default:"?" }} min</span>
                 {% if meal.recipe.cuisine %}<span>{{ meal.recipe.cuisine }}</span>{% endif %}
                 {% if meal.is_scaled %}<span>Serves {{ meal.serving_count }}</span>{% endif %}
+                {% if meal.ingredients_ordered %}<span class="tag text-like">Ordered</span>{% endif %}
                 {% if meal.locked %}<span class="tag tag-accent">Locked</span>{% endif %}
             </div>
             {% if meal.recipe.summary %}<p class="day-summary">{{ meal.recipe.summary }}</p>{% endif %}

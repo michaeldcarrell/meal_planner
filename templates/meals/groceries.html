@@ -6,7 +6,20 @@
     Week of {{ plan.week_start|date:"M j" }}
 </a>
 <h1 class="page-title">Groceries</h1>
-<p class="page-subtitle">Uncheck anything you already have. Checked items go to your King Soopers cart (1 each, pickup), then adjust quantities and check out in the King Soopers app.</p>
+<p class="page-subtitle">Uncheck anything you already have. Checked items go to your King Soopers cart (1 each, pickup), then adjust quantities and check out in the King Soopers app. Items already in the cart are marked Ordered and left unchecked.</p>
+
+{% if meals %}
+<nav class="meal-filter mt-3" aria-label="Filter by meal">
+    <a class="chip-link" href="{{ request.path }}" {% if not selected %}aria-current="true"{% endif %}>All meals</a>
+    {% for meal in meals %}
+    <a class="chip-link" href="?meal={{ meal.pk }}" {% if selected.pk == meal.pk %}aria-current="true"{% endif %}>
+        <span class="chip-day">{{ meal.date|date:"D" }}{% if show_meal_types %} {{ meal.get_meal_type_display|slice:":1" }}{% endif %}</span>
+        <span class="chip-name">{{ meal.recipe.name }}</span>
+        {% if meal.ingredients_ordered %}<svg class="text-like" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="ingredients ordered"><path d="M20 6L9 17l-5-5"></path></svg>{% endif %}
+    </a>
+    {% endfor %}
+</nav>
+{% endif %}
 
 {% if not kroger_connected %}
 <div class="note note-warn mt-3 d-flex align-items-center justify-content-between gap-3 flex-wrap">
@@ -22,17 +35,24 @@
 
 <form method="post" class="slow">{% csrf_token %}
     <section class="section mt-3">
-        <div class="section-header"><h2>Shopping list</h2><span class="list-row-meta num">{{ items|length }} items</span></div>
+        <div class="section-header">
+            <h2>{% if selected %}{{ selected.recipe.name }}{% else %}Shopping list{% endif %}</h2>
+            <span class="list-row-meta num">{{ to_buy }} to buy · {{ items|length }} items</span>
+        </div>
         {% for item in items %}
-        <label class="check-row">
-            <input class="form-check-input" type="checkbox" name="item" value="{{ item.grocery_item }}" {% if not item.pantry_staple %}checked{% endif %}>
+        <label class="check-row{% if item.ordered %} is-ordered{% endif %}">
+            <input class="form-check-input" type="checkbox" name="item" value="{{ item.grocery_item }}" {% if not item.pantry_staple and not item.ordered %}checked{% endif %}>
             <span class="min-w-0">
-                <span class="list-row-name d-block">{{ item.grocery_item }}{% if item.pantry_staple %} <span class="tag ms-1">Pantry</span>{% endif %}</span>
-                <span class="list-row-meta d-block mt-1">{{ item.uses|join:"; " }}</span>
+                <span class="list-row-name d-block">{{ item.grocery_item }}{% if item.ordered %} <span class="tag text-like ms-1">Ordered</span>{% endif %}{% if item.pantry_staple %} <span class="tag ms-1">Pantry</span>{% endif %}</span>
+                <span class="grocery-uses">
+                    {% for use in item.uses %}
+                    <span class="grocery-use"><span class="meal-badge{% if selected.pk == use.meal.pk %} is-selected{% endif %}" title="{{ use.meal.date|date:'l' }} {{ use.meal.get_meal_type_display|lower }}: {{ use.meal.recipe.name }}"><span class="meal-badge-day">{{ use.meal.date|date:"D" }}</span><span class="chip-name">{{ use.meal.recipe.name }}</span></span>{% if use.quantity %} <span class="num">{{ use.quantity }}</span>{% endif %}</span>
+                    {% endfor %}
+                </span>
             </span>
         </label>
         {% empty %}
-        <p class="note mt-3">No ingredients on this week's plan.</p>
+        <p class="note mt-3">{% if selected %}No ingredients for this meal.{% else %}No ingredients on this week's plan.{% endif %}</p>
         {% endfor %}
     </section>
     {% if items %}

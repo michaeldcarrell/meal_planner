@@ -304,7 +304,7 @@ class PlanServiceTests(TestCase):
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Serves 6')
         self.assertContains(self.client.get(f'/recipes/{meal.recipe_id}/'), '<span class="qty">1 tsp</span>', html=False)
         onion = next(i for i in services.grocery_list(plan) if i['grocery_item'] == 'yellow onion')
-        self.assertIn('1 1/2 yellow onion (Dish Mon, serves 6)', onion['uses'])
+        self.assertIn(('Dish Mon', '1 1/2'), [(u['meal'].recipe.name, u['quantity']) for u in onion['uses']])
         description = calendar_sync._event_content(meal)['description']
         self.assertIn('• 1 1/2 tsp salt', description)
         self.assertIn('serves 6', description)
@@ -321,6 +321,56 @@ class PlanServiceTests(TestCase):
         self.assertIsNone(moved.servings)
         for bad in ('0', '25', 'lots'):
             self.assertEqual(self.client.post(f'/meals/{moved.pk}/servings/', {'servings': bad}).status_code, 400)
+
+    @mock.patch('meals.kroger.add_to_cart')
+    @mock.patch('meals.kroger.search_products', side_effect=lambda term, loc, limit: [{'upc': term, 'description': term}])
+    def test_cart_fill_marks_items_and_meals_ordered_and_list_filters_by_meal(self, search, add, *_):
+        household = HouseholdSettings.load(self.home)
+        household.kroger_location_id = '62000123'
+        household.save()
+        KrogerAuth.objects.create(household=self.home, access_token='a', refresh_token='r',
+                                  expires_at=timezone.now() + timedelta(hours=1))
+        plan = MealPlan.objects.create(household=self.home, week_start=SUNDAY)
+
+        def plan_meal(day, name, items):
+            recipe = planner.resolve_recipe(self.home, planner.MealChoice(
+                date='x', meal_type='dinner', existing_recipe_id=None, new_recipe=new_recipe(name, items), why=''))
+            return PlannedMeal.objects.create(plan=plan, date=day, recipe=recipe)
+        tacos = plan_meal(date(2026, 10, 26), 'Tacos', ['yellow onion', 'black beans'])
+        bowls = plan_meal(date(2026, 10, 27), 'Rice bowls', ['yellow onion', 'rice'])
+        url = f'/plan/{SUNDAY}/groceries/'
+        self.client.force_login(self.user)
+
+        page = self.client.get(url).content.decode()
+        self.assertIn('<span class="chip-name">Tacos</span>', page)  # filter chip and badges
+        self.assertIn('3 to buy · 4 items', page)
+        filtered = self.client.get(url, {'meal': tacos.pk}).content.decode()
+        self.assertIn('value="black beans"', filtered)
+        self.assertNotIn('value="rice"', filtered)
+        self.assertIn('<span class="meal-badge is-selected"', filtered)
+
+        # Fill the cart from the Tacos filter: Tacos is ordered; Rice bowls still needs rice.
+        response = self.client.post(f'{url}?meal={tacos.pk}', {'item': ['yellow onion', 'black beans']})
+        self.assertRedirects(response, f'{url}?meal={tacos.pk}', fetch_redirect_response=False)
+        self.assertIn('Ingredients ordered for Tacos.', [str(m) for m in self.client.get(url).context['messages']][0])
+        items = services.grocery_list(plan)
+        self.assertEqual({i['grocery_item'] for i in items if i['ordered']}, {'yellow onion', 'black beans'})
+        self.assertEqual(services.ordered_meal_ids(items), {tacos.pk})
+        page = self.client.get(url).content.decode()
+        self.assertIn('value="rice" checked', page)
+        self.assertNotIn('value="black beans" checked', page)  # ordered items are left unchecked...
+        self.assertLess(page.index('value="rice"'), page.index('value="black beans"'))  # ...and listed after
+        self.assertIn('1 to buy · 4 items', page)
+        self.assertEqual(self.client.get(f'/plan/{SUNDAY}/').content.decode().count('tag text-like">Ordered'), 1)
+
+        self.client.post(url, {'item': ['rice']})
+        self.assertEqual(services.ordered_meal_ids(services.grocery_list(plan)), {tacos.pk, bowls.pk})
+        # Swapping in a recipe with new ingredients puts that meal back on the list.
+        with mock.patch('meals.planner.choose_replacement', return_value=planner.MealChoice(
+                date='2026-10-27', meal_type='dinner', existing_recipe_id=None,
+                new_recipe=new_recipe('Tofu stir fry', ['tofu']), why='')):
+            services.replace_with_suggestion(bowls, self.user)
+        self.assertEqual(services.ordered_meal_ids(services.grocery_list(plan)), {tacos.pk})
 
     def test_resolve_recipe_reuses_known_recipe(self, *_):
         known = Recipe.objects.create(household=self.home, name='Tacos')

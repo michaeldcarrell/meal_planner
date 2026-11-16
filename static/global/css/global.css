@@ -1460,6 +1460,95 @@ figure.recipe-hero {
 }
 
 /* Move sheet: one button per other day of the week. */
+/* Grocery list: filter chips, and which meals each item is for. */
+.meal-filter {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+}
+
+.chip-link {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    max-width: 240px;
+    padding: 6px 10px;
+    border: 1px solid var(--mp-line);
+    border-radius: 999px;
+    background: var(--mp-surface);
+    color: var(--mp-ink);
+    font-size: 13px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.chip-link:hover {
+    border-color: var(--mp-dim);
+    color: var(--mp-ink);
+}
+
+.chip-link[aria-current="true"] {
+    border-color: var(--mp-accent);
+    background: var(--mp-accent-soft);
+}
+
+.chip-day,
+.meal-badge-day {
+    font-family: var(--mp-font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--mp-muted);
+}
+
+.chip-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.grocery-uses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--mp-muted);
+}
+
+.grocery-use {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.meal-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 200px;
+    padding: 1px 7px;
+    border: 1px solid var(--mp-line);
+    border-radius: 4px;
+    color: var(--mp-ink);
+}
+
+.meal-badge.is-selected {
+    border-color: var(--mp-accent);
+    background: var(--mp-accent-soft);
+}
+
+.check-row.is-ordered .list-row-name {
+    color: var(--mp-muted);
+}
+
 /* Meal page: how many servings to cook. */
 .servings-control {
     display: flex;

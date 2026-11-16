@@ -250,21 +250,38 @@ def _normalize(item: str) -> str:
     return re.sub(r'\s+', ' ', item.strip().lower())
 
 
-def grocery_list(plan: MealPlan) -> list[dict]:
-    """Ingredients for the week merged by grocery item, pantry staples marked.
+def ordered_items(plan: MealPlan) -> set[str]:
+    """Grocery items already added to the King Soopers cart for this week (by any cart fill)."""
+    return {r['grocery_item'] for push in plan.cart_pushes.all() for r in push.results if r.get('status') == 'added'}
 
-    Returns [{"grocery_item", "uses": ["2 lb (Tacos)", ...], "pantry_staple"}], staples last.
+
+def grocery_list(plan: MealPlan, meal: PlannedMeal | None = None) -> list[dict]:
+    """Ingredients for the week merged by grocery item: what to buy first, then what's already in the
+    cart (`ordered`), then pantry staples. With `meal`, only the items that meal uses.
+
+    Returns [{"grocery_item", "uses": [{"meal", "quantity", "name"}], "meal_ids", "pantry_staple", "ordered"}].
     """
     staples = HouseholdSettings.load(plan.household).pantry_staple_set
+    ordered = ordered_items(plan)
     merged: OrderedDict[str, dict] = OrderedDict()
-    for meal in plan.meals.select_related('recipe'):
-        for ing in meal.ingredients:
+    for m in plan.meals.select_related('recipe'):
+        for ing in m.ingredients:
             key = _normalize(ing.get('grocery_item') or ing['name'])
-            entry = merged.setdefault(key, {'grocery_item': key, 'uses': [], 'pantry_staple': False})
-            label = f'{meal.recipe.name}, serves {meal.serving_count}' if meal.is_scaled else meal.recipe.name
-            entry['uses'].append(f"{ing.get('quantity', '')} {ing['name']} ({label})".strip())
+            entry = merged.setdefault(key, {'grocery_item': key, 'uses': [], 'meal_ids': set(),
+                                            'pantry_staple': False, 'ordered': key in ordered})
+            entry['uses'].append({'meal': m, 'quantity': ing.get('quantity', ''), 'name': ing['name']})
+            entry['meal_ids'].add(m.pk)
             entry['pantry_staple'] = entry['pantry_staple'] or bool(ing.get('pantry_staple')) or key in staples
-    return sorted(merged.values(), key=lambda e: (e['pantry_staple'], e['grocery_item']))
+    items = [e for e in merged.values() if meal is None or meal.pk in e['meal_ids']]
+    return sorted(items, key=lambda e: (e['pantry_staple'], e['ordered'], e['grocery_item']))
+
+
+def ordered_meal_ids(items: list[dict]) -> set[int]:
+    """Meals whose ingredients are all in the cart (pantry staples aside), from a full `grocery_list`."""
+    meal_ids = {mid for e in items for mid in e['meal_ids']}
+    waiting = {mid for e in items if not e['pantry_staple'] and not e['ordered'] for mid in e['meal_ids']}
+    buying = {mid for e in items if not e['pantry_staple'] for mid in e['meal_ids']}
+    return (meal_ids & buying) - waiting
 
 
 def push_to_cart(plan: MealPlan, grocery_items: list[str], user) -> CartPush:
