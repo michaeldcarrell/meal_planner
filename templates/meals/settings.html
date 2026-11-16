@@ -2,7 +2,23 @@
 {% block title %}Settings{% endblock %}
 {% block body %}
 <h1 class="page-title">Settings</h1>
-<p class="page-subtitle">Shared by everyone in the household.</p>
+<p class="page-subtitle">Shared by everyone in {{ current_household.name }}.</p>
+
+<section class="section" id="household">
+    <div class="section-header">
+        <h2>Household</h2>
+        <span class="list-row-meta">{{ members|length }} member{{ members|length|pluralize }}</span>
+    </div>
+    <p class="small text-body-secondary pt-3">
+        Everyone here shares one menu: the week's plan, recipes and ratings, preferences, store and calendar.
+        {% if my_households|length > 1 %}Switch households from the menu at the top.{% endif %}
+    </p>
+    <dl class="detail-list mb-0">
+        {% for m in members %}
+        <div><dt>{{ m.member.name|default:m.member.email }}</dt><dd>{% if m.receives_plan_email %}Gets the weekly email{% else %}No weekly email{% endif %}</dd></div>
+        {% endfor %}
+    </dl>
+</section>
 
 <a href="{% url 'preferences' %}" class="list-row mt-3">
     <div class="min-w-0">

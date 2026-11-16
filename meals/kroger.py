@@ -1,7 +1,7 @@
 """Kroger public API (King Soopers is a Kroger banner): OAuth, product search, add-to-cart.
 
-The API can fill the household's cart but cannot check out — that still happens in the
-King Soopers app/site.
+Each household connects its own account. The API can fill that account's cart but cannot check
+out — that still happens in the King Soopers app/site.
 """
 import logging
 from datetime import timedelta
@@ -11,7 +11,7 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 
-from meals.models import KrogerAuth
+from meals.models import Household, KrogerAuth
 
 logger = logging.getLogger(__name__)
 
@@ -49,28 +49,29 @@ def _token_request(data: dict) -> dict:
     return response.json()
 
 
-def _save_tokens(payload: dict) -> KrogerAuth:
-    auth, _ = KrogerAuth.objects.update_or_create(pk=1, defaults={
+def _save_tokens(household: Household, payload: dict) -> KrogerAuth:
+    auth, _ = KrogerAuth.objects.update_or_create(household=household, defaults={
         'access_token': payload['access_token'],
-        'refresh_token': payload.get('refresh_token') or KrogerAuth.objects.get(pk=1).refresh_token,
+        'refresh_token': payload.get('refresh_token') or KrogerAuth.objects.get(household=household).refresh_token,
         'expires_at': timezone.now() + timedelta(seconds=payload.get('expires_in', 1800) - 60),
     })
     return auth
 
 
-def exchange_code(code: str) -> KrogerAuth:
-    return _save_tokens(_token_request({
+def exchange_code(household: Household, code: str) -> KrogerAuth:
+    return _save_tokens(household, _token_request({
         'grant_type': 'authorization_code', 'code': code, 'redirect_uri': redirect_uri(),
     }))
 
 
-def _user_token() -> str:
-    auth = KrogerAuth.objects.filter(pk=1).first()
+def _user_token(household: Household) -> str:
+    auth = KrogerAuth.objects.filter(household=household).first()
     if not auth:
         raise KrogerNotConnected()
     if auth.expires_at <= timezone.now():
         try:
-            auth = _save_tokens(_token_request({'grant_type': 'refresh_token', 'refresh_token': auth.refresh_token}))
+            auth = _save_tokens(household, _token_request(
+                {'grant_type': 'refresh_token', 'refresh_token': auth.refresh_token}))
         except requests.HTTPError as e:
             logger.warning('Kroger token refresh failed: %s', e)
             raise KrogerNotConnected() from e
@@ -82,8 +83,8 @@ def _app_token() -> str:
     return _token_request({'grant_type': 'client_credentials', 'scope': 'product.compact'})['access_token']
 
 
-def is_connected() -> bool:
-    return KrogerAuth.objects.filter(pk=1).exists()
+def is_connected(household: Household) -> bool:
+    return KrogerAuth.objects.filter(household=household).exists()
 
 
 def search_products(term: str, location_id: str, limit: int = 5, token: str | None = None) -> list[dict]:
@@ -108,12 +109,12 @@ def find_locations(zip_code: str) -> list[dict]:
     return response.json().get('data', [])
 
 
-def add_to_cart(items: list[dict]):
-    """`items` are {"upc", "quantity"}; added for pickup."""
+def add_to_cart(household: Household, items: list[dict]):
+    """`items` are {"upc", "quantity"}; added for pickup to the household's connected account."""
     response = requests.put(
         f'{settings.KROGER_API_BASE}/cart/add',
         json={'items': [{'upc': i['upc'], 'quantity': i.get('quantity', 1), 'modality': 'PICKUP'} for i in items]},
-        headers={'Authorization': f'Bearer {_user_token()}', 'Accept': 'application/json'},
+        headers={'Authorization': f'Bearer {_user_token(household)}', 'Accept': 'application/json'},
         timeout=TIMEOUT,
     )
     if response.status_code == 401:

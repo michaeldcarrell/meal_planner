@@ -11,7 +11,8 @@ from django.utils import timezone
 from pydantic import BaseModel, Field
 
 from meals.models import (
-    COOK_TIMES, MEAL_TYPES, PROTEINS, HouseholdSettings, MealSwap, MemberPreferences, PlannedMeal, Rating, Recipe,
+    COOK_TIMES, MEAL_TYPES, PROTEINS, Household, HouseholdSettings, MealSwap, MemberPreferences, PlannedMeal, Rating,
+    Recipe,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ def _client() -> anthropic.Anthropic:
 
 
 def _preferences(household: HouseholdSettings) -> dict:
+    """The household's shared preferences, plus the loves and dislikes of each of its members."""
     labels = dict(PROTEINS)
     proteins = household.protein_preferences or {}
     time_label = next(
@@ -100,24 +102,25 @@ def _preferences(household: HouseholdSettings) -> dict:
         'favorite_styles': household.meal_styles,
         'members': [
             {'name': p.user.first_name or p.user.username, 'loves': p.love_list, 'dislikes': p.dislike_list}
-            for p in MemberPreferences.objects.select_related('user')
+            for p in MemberPreferences.objects.filter(user__in=household.household.member_users()).select_related('user')
             if p.love_list or p.dislike_list
         ],
     }
 
 
-def _household_context(exclude_dates: set[date] | None = None) -> str:
-    """Everything the planner should know, as a compact JSON-ish text block."""
-    household = HouseholdSettings.load()
+def _household_context(home: Household, exclude_dates: set[date] | None = None) -> str:
+    """Everything the planner should know about `home`, as a compact JSON-ish text block."""
+    household = HouseholdSettings.load(home)
     today = timezone.localdate()
 
     recipe_rows = (
-        Recipe.objects.filter(archived=False)
+        Recipe.objects.filter(household=home, archived=False)
         .annotate(total=Sum('ratings__value'))
         .order_by('-total', '-created_at')[:MAX_KNOWN_RECIPES]
     )
     meal_types: dict[int, set[str]] = {}
-    for recipe_id, meal_type in PlannedMeal.objects.values_list('recipe_id', 'meal_type').distinct():
+    for recipe_id, meal_type in (PlannedMeal.objects.filter(plan__household=home)
+                                 .values_list('recipe_id', 'meal_type').distinct()):
         meal_types.setdefault(recipe_id, set()).add(meal_type)
     order = [key for key, _ in MEAL_TYPES]
     known = [
@@ -128,11 +131,12 @@ def _household_context(exclude_dates: set[date] | None = None) -> str:
 
     comments = [
         {'recipe': r.recipe.name, 'rating': 'liked' if r.value > 0 else 'disliked', 'comment': r.comment}
-        for r in Rating.objects.exclude(comment='').select_related('recipe').order_by('-updated_at')[:40]
+        for r in Rating.objects.filter(recipe__household=home).exclude(comment='')
+        .select_related('recipe').order_by('-updated_at')[:40]
     ]
 
     history_qs = PlannedMeal.objects.filter(
-        date__gte=today - timedelta(weeks=HISTORY_WEEKS)).select_related('recipe')
+        plan__household=home, date__gte=today - timedelta(weeks=HISTORY_WEEKS)).select_related('recipe')
     if exclude_dates:
         history_qs = history_qs.exclude(date__in=exclude_dates)
     history = [{'date': m.date.isoformat(), 'meal': m.meal_type, 'recipe_id': m.recipe_id, 'name': m.recipe.name}
@@ -140,10 +144,11 @@ def _household_context(exclude_dates: set[date] | None = None) -> str:
 
     swaps = [
         {'recipe': s.recipe.name, 'reason': s.reason}
-        for s in MealSwap.objects.filter(created_at__gte=timezone.now() - timedelta(weeks=HISTORY_WEEKS))
+        for s in MealSwap.objects.filter(recipe__household=home,
+                                         created_at__gte=timezone.now() - timedelta(weeks=HISTORY_WEEKS))
         .select_related('recipe').order_by('-created_at')[:30]
     ]
-    archived = list(Recipe.objects.filter(archived=True).values_list('name', flat=True)[:100])
+    archived = list(Recipe.objects.filter(household=home, archived=True).values_list('name', flat=True)[:100])
 
     return json.dumps({
         'household_notes': household.dietary_notes or '(none)',
@@ -185,10 +190,10 @@ def _slot_text(day: date, meal_type: str) -> str:
     return f'{day:%A} {day.isoformat()} {meal_type}'
 
 
-def choose_week(slots: list[tuple[date, str]], locked: dict[tuple[date, str], Recipe],
+def choose_week(home: Household, slots: list[tuple[date, str]], locked: dict[tuple[date, str], Recipe],
                 hint: str = '') -> list[MealChoice]:
     """Pick a meal for each (date, meal_type) in `slots` that isn't already in `locked`."""
-    household = HouseholdSettings.load()
+    household = HouseholdSettings.load(home)
     open_slots = [s for s in slots if s not in locked]
     if not open_slots:
         return []
@@ -203,7 +208,7 @@ def choose_week(slots: list[tuple[date, str]], locked: dict[tuple[date, str], Re
     if hint:
         instructions += f"\nWhat the household asked for: {hint}"
 
-    choices = _ask(instructions, _household_context(exclude_dates={d for d, _ in slots}))
+    choices = _ask(instructions, _household_context(home, exclude_dates={d for d, _ in slots}))
     by_slot = {(c.date, c.meal_type): c for c in choices.meals}
     missing = [s for s in open_slots if (s[0].isoformat(), s[1]) not in by_slot]
     if missing:
@@ -223,7 +228,7 @@ def choose_replacement(meal: PlannedMeal, hint: str) -> MealChoice:
         f"Return exactly one {meal.meal_type}, for {meal.date.isoformat()}, and don't pick "
         f"\"{meal.recipe.name}\" again."
     )
-    choices = _ask(instructions, _household_context())
+    choices = _ask(instructions, _household_context(meal.plan.household))
     if not choices.meals:
         raise RuntimeError('Claude returned no replacement')
     choice = choices.meals[0]
@@ -232,10 +237,10 @@ def choose_replacement(meal: PlannedMeal, hint: str) -> MealChoice:
     return choice
 
 
-def resolve_recipe(choice: MealChoice) -> Recipe:
-    """Turn a MealChoice into a saved Recipe (looking up a known one, or creating the new one)."""
+def resolve_recipe(home: Household, choice: MealChoice) -> Recipe:
+    """Turn a MealChoice into a saved Recipe in `home`'s library (a known one, or the new one)."""
     if choice.existing_recipe_id:
-        recipe = Recipe.objects.filter(pk=choice.existing_recipe_id, archived=False).first()
+        recipe = Recipe.objects.filter(pk=choice.existing_recipe_id, household=home, archived=False).first()
         if recipe:
             return recipe
         logger.warning('Claude referenced unknown/archived recipe id %s', choice.existing_recipe_id)
@@ -243,6 +248,7 @@ def resolve_recipe(choice: MealChoice) -> Recipe:
         raise RuntimeError(f'The {choice.meal_type} for {choice.date} has neither a known recipe nor a new one')
     new = choice.new_recipe
     return Recipe.objects.create(
+        household=home,
         name=new.name,
         summary=new.summary,
         cuisine=new.cuisine,

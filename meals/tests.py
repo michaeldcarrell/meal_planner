@@ -5,13 +5,13 @@ from unittest import mock
 import requests
 from django.contrib.auth.models import User
 from django.core import mail
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from meals import calendar_sync, photos, planner, services
 from meals.models import (
-    AllowedUser, GroceryProduct, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, MealSwap, PlannedMeal, Rating, Recipe,
-    RecipePhoto, week_start_for,
+    AllowedUser, GroceryProduct, Household, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, MealSwap,
+    Membership, PlannedMeal, Rating, Recipe, RecipePhoto, week_start_for,
 )
 
 SUNDAY = date(2026, 10, 25)
@@ -26,7 +26,16 @@ def new_recipe(name, items=('yellow onion',)):
     )
 
 
-def fake_choose_week(slots, locked, hint=''):
+def make_household(name='Home', *emails, quiet=()):
+    """A household with these members (AllowedUsers, created as needed); `quiet` ones get no weekly email."""
+    household = Household.objects.create(name=name)
+    for email in (*emails, *quiet):
+        member, _ = AllowedUser.objects.get_or_create(email=email)
+        Membership.objects.create(household=household, member=member, receives_plan_email=email not in quiet)
+    return household
+
+
+def fake_choose_week(home, slots, locked, hint=''):
     return [
         planner.MealChoice(date=d.isoformat(), meal_type=t, existing_recipe_id=None,
                            new_recipe=new_recipe(f'Dish {d:%a}' if t == 'dinner' else f'{t.title()} {d:%a}'), why='variety')
@@ -40,9 +49,7 @@ def fake_choose_week(slots, locked, hint=''):
 class PlanServiceTests(TestCase):
     def setUp(self):
         self.user = User.objects.create(username='mike', email='mike@example.com')
-        AllowedUser.objects.create(email='mike@example.com')
-        AllowedUser.objects.create(email='partner@example.com')
-        AllowedUser.objects.create(email='quiet@example.com', receives_plan_email=False)
+        self.home = make_household('Home', 'mike@example.com', 'partner@example.com', quiet=['quiet@example.com'])
 
     def test_week_start_is_sunday(self, *_):
         self.assertEqual(week_start_for(date(2026, 10, 29)), SUNDAY)
@@ -50,10 +57,10 @@ class PlanServiceTests(TestCase):
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_generate_week_fills_weeknights_and_is_idempotent(self, choose, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         self.assertEqual([m.date.weekday() for m in plan.meals.all()], [0, 1, 2, 3, 4])
         self.assertEqual(sync.call_count, 5)
-        services.generate_week(SUNDAY)
+        services.generate_week(self.home, SUNDAY)
         self.assertEqual(choose.call_count, 1)
         self.assertEqual(plan.meals.count(), 5)
 
@@ -62,7 +69,7 @@ class PlanServiceTests(TestCase):
         doesn't start another run."""
         seen = {}
 
-        def choose(slots, locked, hint=''):
+        def choose(home, slots, locked, hint=''):
             self.client.force_login(self.user)
             page = self.client.get(f'/plan/{SUNDAY}/')
             seen['page'] = page.content.decode()
@@ -70,10 +77,10 @@ class PlanServiceTests(TestCase):
             with mock.patch('meals.planner.choose_week') as second:
                 self.client.post(f'/plan/{SUNDAY}/generate/')
                 seen['second_run'] = second.called
-            return fake_choose_week(slots, locked)
+            return fake_choose_week(home, slots, locked)
 
         with mock.patch('meals.planner.choose_week', side_effect=choose):
-            plan = services.generate_week(SUNDAY)
+            plan = services.generate_week(self.home, SUNDAY)
         self.assertIn('Planning this week', seen['page'])
         self.assertNotIn('Plan this week</button>', seen['page'])
         self.assertEqual(seen['status'], {'generating': True})
@@ -85,7 +92,7 @@ class PlanServiceTests(TestCase):
     @mock.patch('meals.planner.choose_week', side_effect=RuntimeError('boom'))
     def test_failed_generation_clears_the_flag_and_stale_flags_expire(self, *_):
         with self.assertRaises(RuntimeError):
-            services.generate_week(SUNDAY)
+            services.generate_week(self.home, SUNDAY)
         plan = MealPlan.objects.get(week_start=SUNDAY)
         self.assertIsNone(plan.generating_since)
         # A run killed outright (worker timeout) never clears it; it stops counting after a while.
@@ -93,63 +100,63 @@ class PlanServiceTests(TestCase):
         plan.save()
         self.assertFalse(plan.is_generating)
         with self.assertRaises(RuntimeError):  # not PlanBusy: the stale claim is taken over
-            services.generate_week(SUNDAY)
+            services.generate_week(self.home, SUNDAY)
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_regenerate_keeps_locked_meals(self, choose, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         keep = plan.meals.first()
         keep.locked = True
         keep.save()
-        services.generate_week(SUNDAY, regenerate=True)
+        services.generate_week(self.home, SUNDAY, regenerate=True)
         self.assertEqual(plan.meals.count(), 5)
         self.assertTrue(plan.meals.filter(pk=keep.pk).exists())
         self.assertEqual(delete_event.call_count, 4)
-        self.assertEqual(choose.call_args.args[1], {(keep.date, 'dinner'): keep.recipe})
+        self.assertEqual(choose.call_args.args[2], {(keep.date, 'dinner'): keep.recipe})
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_generate_week_follows_the_meal_schedule(self, choose, delete_event, sync):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(self.home)
         household.meal_schedule = {'breakfast': [5, 6], 'lunch': [0], 'dinner': [0, 1]}
         household.save()
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         self.assertEqual([(m.date.day, m.meal_type) for m in plan.meals.all()], [
             (25, 'breakfast'), (26, 'lunch'), (26, 'dinner'), (27, 'dinner'), (31, 'breakfast')])
-        self.assertEqual(services.generate_week(SUNDAY), plan)
+        self.assertEqual(services.generate_week(self.home, SUNDAY), plan)
         self.assertEqual(choose.call_count, 1)
 
         # Adding a lunch later fills just that one.
         household.meal_schedule['lunch'] = [0, 1]
         household.save()
-        services.generate_week(SUNDAY)
-        self.assertEqual(choose.call_args.args[0][3], (date(2026, 10, 27), 'lunch'))
+        services.generate_week(self.home, SUNDAY)
+        self.assertEqual(choose.call_args.args[1][3], (date(2026, 10, 27), 'lunch'))
         self.assertEqual(plan.meals.filter(meal_type='lunch').count(), 2)
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_removed_meal_stays_removed_for_that_week(self, choose, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         tuesday = plan.meals.get(date=date(2026, 10, 27))
         services.remove_meal(tuesday)
         delete_event.assert_called_once()
         self.assertEqual(plan.meals.count(), 4)
-        services.generate_week(SUNDAY)
-        services.generate_week(SUNDAY, regenerate=True)
+        services.generate_week(self.home, SUNDAY)
+        services.generate_week(self.home, SUNDAY, regenerate=True)
         self.assertFalse(plan.meals.filter(date=date(2026, 10, 27)).exists())
-        self.assertNotIn((date(2026, 10, 27), 'dinner'), choose.call_args.args[0])
+        self.assertNotIn((date(2026, 10, 27), 'dinner'), choose.call_args.args[1])
         # Next week still follows the schedule.
-        self.assertEqual(services.generate_week(date(2026, 11, 1)).meals.count(), 5)
+        self.assertEqual(services.generate_week(self.home, date(2026, 11, 1)).meals.count(), 5)
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_added_meal_is_planned_and_kept_on_regenerate(self, choose, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         saturday = date(2026, 10, 31)
         meal = services.add_meal(plan, saturday, 'lunch', self.user, hint='something light')
         self.assertEqual((meal.recipe.name, meal.meal_type), ('Lunch Sat', 'lunch'))
-        self.assertEqual(choose.call_args.args[0], [(saturday, 'lunch')])
+        self.assertEqual(choose.call_args.args[1], [(saturday, 'lunch')])
         self.assertEqual(choose.call_args.kwargs['hint'], 'something light')
-        self.assertEqual(len(choose.call_args.args[1]), 5)  # the rest of the week, so it isn't duplicated
+        self.assertEqual(len(choose.call_args.args[2]), 5)  # the rest of the week, so it isn't duplicated
         sync.assert_called_with(meal)
-        services.generate_week(SUNDAY, regenerate=True)
+        services.generate_week(self.home, SUNDAY, regenerate=True)
         self.assertTrue(plan.meals.filter(date=saturday, meal_type='lunch').exists())
         with self.assertRaises(ValueError):
             services.add_meal(plan, saturday, 'lunch', self.user)
@@ -158,8 +165,8 @@ class PlanServiceTests(TestCase):
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_add_and_remove_from_the_week_page(self, choose, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
-        favorite = Recipe.objects.create(name='Pancakes')
+        plan = services.generate_week(self.home, SUNDAY)
+        favorite = Recipe.objects.create(household=self.home, name='Pancakes')
         Rating.objects.create(recipe=favorite, user=self.user, value=1)
         self.client.force_login(self.user)
         page = self.client.get(f'/plan/{SUNDAY}/')
@@ -184,7 +191,7 @@ class PlanServiceTests(TestCase):
     @mock.patch('meals.calendar_sync.move_meal_event')
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_move_meal_to_a_free_day_and_trade_with_a_taken_one(self, choose, move_event, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         monday = plan.meals.get(date=date(2026, 10, 26))
         monday.locked = True
         monday.save()
@@ -193,7 +200,7 @@ class PlanServiceTests(TestCase):
         moved = services.move_meal(monday, date(2026, 10, 31))
         self.assertEqual((moved.pk, moved.date, moved.recipe.name), (monday.pk, date(2026, 10, 31), 'Dish Mon'))
         move_event.assert_called_once_with(moved, 5)
-        services.generate_week(SUNDAY, regenerate=True)
+        services.generate_week(self.home, SUNDAY, regenerate=True)
         self.assertFalse(plan.meals.filter(date=date(2026, 10, 26)).exists())
         self.assertTrue(plan.meals.filter(date=date(2026, 10, 31), locked=True).exists())
 
@@ -219,7 +226,7 @@ class PlanServiceTests(TestCase):
     @mock.patch('meals.calendar_sync.move_meal_event')
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_move_from_the_week_page(self, choose, move_event, delete_event, sync):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         meal = plan.meals.get(date=date(2026, 10, 26))
         self.client.force_login(self.user)
         page = self.client.get(f'/plan/{SUNDAY}/')
@@ -233,15 +240,20 @@ class PlanServiceTests(TestCase):
         self.assertEqual(self.client.post(f'/meals/{meal.pk}/move/', {'date': 'soon'}).status_code, 400)
 
     def test_resolve_recipe_reuses_known_recipe(self, *_):
-        known = Recipe.objects.create(name='Tacos')
+        known = Recipe.objects.create(household=self.home, name='Tacos')
         choice = planner.MealChoice(date='2026-10-26', meal_type='dinner', existing_recipe_id=known.pk, new_recipe=None,
                                     why='loved')
-        self.assertEqual(planner.resolve_recipe(choice), known)
+        self.assertEqual(planner.resolve_recipe(self.home, choice), known)
+        # Another household's recipe id isn't reused; with no new recipe to fall back on, that's an error.
+        other = Recipe.objects.create(household=make_household('Other'), name='Their tacos')
+        choice.existing_recipe_id = other.pk
+        with self.assertRaises(RuntimeError):
+            planner.resolve_recipe(self.home, choice)
 
     @mock.patch('meals.planner.choose_replacement')
     def test_replace_records_swap(self, choose_replacement, delete_event, sync):
-        plan = MealPlan.objects.create(week_start=SUNDAY)
-        old = Recipe.objects.create(name='Chili')
+        plan = MealPlan.objects.create(household=self.home, week_start=SUNDAY)
+        old = Recipe.objects.create(household=self.home, name='Chili')
         meal = PlannedMeal.objects.create(plan=plan, date=date(2026, 10, 26), recipe=old)
         choose_replacement.return_value = planner.MealChoice(
             date='2026-10-26', meal_type='dinner', existing_recipe_id=None, new_recipe=new_recipe('Stir fry'), why='quicker')
@@ -253,9 +265,9 @@ class PlanServiceTests(TestCase):
         sync.assert_called_once()
 
     def test_grocery_list_merges_items_and_flags_staples(self, *_):
-        plan = MealPlan.objects.create(week_start=SUNDAY)
+        plan = MealPlan.objects.create(household=self.home, week_start=SUNDAY)
         for i, name in enumerate(['A', 'B']):
-            recipe = planner.resolve_recipe(planner.MealChoice(
+            recipe = planner.resolve_recipe(self.home, planner.MealChoice(
                 date='x', meal_type='dinner', existing_recipe_id=None, new_recipe=new_recipe(name, ['Yellow Onion', f'item {name}']),
                 why=''))
             PlannedMeal.objects.create(plan=plan, date=date(2026, 10, 26 + i), recipe=recipe)
@@ -267,16 +279,18 @@ class PlanServiceTests(TestCase):
     @mock.patch('meals.kroger.add_to_cart')
     @mock.patch('meals.kroger.search_products')
     def test_push_to_cart_remembers_products(self, search, add, *_):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(self.home)
         household.kroger_location_id = '62000123'
         household.save()
-        plan = MealPlan.objects.create(week_start=SUNDAY)
-        GroceryProduct.objects.create(grocery_item='yellow onion', upc='111', description='Onion')
+        plan = MealPlan.objects.create(household=self.home, week_start=SUNDAY)
+        GroceryProduct.objects.create(household=self.home, grocery_item='yellow onion', upc='111', description='Onion')
+        # Another household's remembered product for the same item isn't used.
+        GroceryProduct.objects.create(household=make_household('Other'), grocery_item='black beans', upc='999')
         search.side_effect = lambda term, loc, limit: [] if term == 'unicorn' else [{'upc': '222', 'description': 'Beans'}]
         push = services.push_to_cart(plan, ['yellow onion', 'black beans', 'unicorn'], self.user)
-        add.assert_called_once_with([{'upc': '111', 'quantity': 1}, {'upc': '222', 'quantity': 1}])
+        add.assert_called_once_with(self.home, [{'upc': '111', 'quantity': 1}, {'upc': '222', 'quantity': 1}])
         self.assertEqual([r['status'] for r in push.results], ['added', 'added', 'no match'])
-        self.assertTrue(GroceryProduct.objects.filter(grocery_item='black beans', upc='222').exists())
+        self.assertTrue(GroceryProduct.objects.filter(household=self.home, grocery_item='black beans', upc='222').exists())
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_internal_endpoint_generates_and_emails_once(self, *_):
@@ -286,7 +300,8 @@ class PlanServiceTests(TestCase):
         headers = {'X-Meal-Planner-Secret': 's3cret'}
         response = self.client.post(url, body, content_type='application/json', headers=headers)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()['meals']), 5)
+        [result] = response.json()['households']
+        self.assertEqual((result['household'], len(result['meals'])), ('Home', 5))
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(sorted(mail.outbox[0].to), ['mike@example.com', 'partner@example.com'])
         self.assertIn('Dish Mon', mail.outbox[0].body)
@@ -299,7 +314,7 @@ class PlanServiceTests(TestCase):
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_pages_render_and_rating_works(self, *_):
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         meal = plan.meals.first()
         self.client.force_login(self.user)
         detail = self.client.get(f'/meals/{meal.pk}/')
@@ -322,15 +337,15 @@ class PlanServiceTests(TestCase):
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Tell the planner what you like')
         self.client.post('/preferences/', {'max_minutes': '20'})
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Connect your King Soopers account')
-        KrogerAuth.objects.create(pk=1, access_token='a', refresh_token='r', expires_at=timezone.now())
-        household = HouseholdSettings.load()
+        KrogerAuth.objects.create(household=self.home, access_token='a', refresh_token='r', expires_at=timezone.now())
+        household = HouseholdSettings.load(self.home)
         household.kroger_location_id = '62000123'
         household.save()
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Connect a Google Calendar')
         household.calendar_id = 'dinners@group.calendar.google.com'
         household.save()
         self.assertContains(self.client.get(f'/plan/{SUNDAY}/'), 'Plan your first week')
-        services.generate_week(SUNDAY)
+        services.generate_week(self.home, SUNDAY)
         self.assertNotContains(self.client.get(f'/plan/{SUNDAY}/'), 'Get set up')
 
     def test_preferences_set_the_meal_schedule(self, *_):
@@ -339,20 +354,20 @@ class PlanServiceTests(TestCase):
         self.assertContains(response, 'Meals each week')
         self.assertContains(response, 'Weekend breakfasts')
         self.client.post('/preferences/', {'days_breakfast': ['5', '6', '9', 'x'], 'days_dinner': ['0', '2', '2']})
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(self.home)
         self.assertEqual(household.schedule, {'breakfast': [5, 6], 'lunch': [], 'dinner': [0, 2]})
         self.assertEqual(household.meals_per_week, 4)
 
         # Unticking everything keeps the old schedule rather than planning nothing.
         self.client.post('/preferences/', {})
-        self.assertEqual(HouseholdSettings.load().meals_per_week, 4)
+        self.assertEqual(HouseholdSettings.load(self.home).meals_per_week, 4)
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_mixed_week_labels_meals(self, *_):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(self.home)
         household.meal_schedule = {'breakfast': [6], 'dinner': [0]}
         household.save()
-        plan = services.generate_week(SUNDAY)
+        plan = services.generate_week(self.home, SUNDAY)
         self.client.force_login(self.user)
         page = self.client.get(f'/plan/{SUNDAY}/')
         self.assertContains(page, '<h2>Meals</h2>', html=False)
@@ -370,7 +385,7 @@ class PlanServiceTests(TestCase):
             'protein_fish': 'bogus', 'cuisine': ['Mexican', 'Thai', 'Martian'], 'style': ['Spicy'],
             'notes': 'Tree nut allergy', 'dislikes': 'broccoli,  olives\nmushrooms', 'loves': 'salmon',
         })
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(self.home)
         self.assertEqual(household.max_weeknight_minutes, 20)
         self.assertEqual(household.protein_preferences, {'chicken': 'more', 'pork': 'never'})
         self.assertEqual(household.favorite_cuisines, ['Mexican', 'Thai'])
@@ -378,7 +393,7 @@ class PlanServiceTests(TestCase):
         self.assertIsNotNone(household.preferences_updated_at)
         self.assertEqual(MemberPreferences.objects.get(user=self.user).dislike_list, ['broccoli', 'olives', 'mushrooms'])
 
-        context = json.loads(planner._household_context())
+        context = json.loads(planner._household_context(self.home))
         self.assertEqual(context['household_notes'], 'Tree nut allergy')
         prefs = context['preferences']
         self.assertEqual(prefs['cooking_time'], 'Quick (10–20 min)')
@@ -387,24 +402,24 @@ class PlanServiceTests(TestCase):
                                               'dislikes': ['broccoli', 'olives', 'mushrooms']}])
 
         # Another member sees what this one won't eat.
-        partner = User.objects.create(username='sam', first_name='Sam')
+        partner = User.objects.create(username='sam', first_name='Sam', email='partner@example.com')
         self.client.force_login(partner)
         self.assertContains(self.client.get('/preferences/'), 'broccoli, olives, mushrooms')
 
     @mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
     def test_settings_connects_checks_and_syncs_calendar(self, choose, delete_event, sync):
         self.client.force_login(self.user)
-        services.generate_week()  # this week, so connecting syncs it
+        services.generate_week(self.home)  # this week, so connecting syncs it
         sync.reset_mock()
         with mock.patch('meals.calendar_sync.check_access', return_value="The bot can't see that calendar."):
             self.client.post('/settings/calendar/', {'calendar_id': 'wrong@group.calendar.google.com'})
-        self.assertEqual(HouseholdSettings.load().calendar_id, '')
+        self.assertEqual(HouseholdSettings.load(self.home).calendar_id, '')
         self.assertFalse(sync.called)
 
         with mock.patch('meals.calendar_sync.check_access', return_value=None) as check:
             self.client.post('/settings/calendar/', {'calendar_id': ' dinners@group.calendar.google.com '})
         check.assert_called_once_with('dinners@group.calendar.google.com')
-        self.assertEqual(HouseholdSettings.load().calendar_id, 'dinners@group.calendar.google.com')
+        self.assertEqual(HouseholdSettings.load(self.home).calendar_id, 'dinners@group.calendar.google.com')
         meals = MealPlan.objects.get(week_start=week_start_for(timezone.localdate())).meals.count()
         self.assertEqual(sync.call_count, meals)
 
@@ -413,7 +428,7 @@ class PlanServiceTests(TestCase):
         self.assertEqual(sync.call_count, meals)
 
         self.client.post('/settings/calendar/', {'calendar_id': 'dinners@group.calendar.google.com', 'disconnect': '1'})
-        self.assertEqual(HouseholdSettings.load().calendar_id, '')
+        self.assertEqual(HouseholdSettings.load(self.home).calendar_id, '')
 
     @mock.patch('meals.kroger.find_locations', return_value=[{
         'locationId': '62000123', 'chain': 'KINGSOOPERS', 'name': 'King Soopers - Arapahoe',
@@ -430,7 +445,7 @@ class PlanServiceTests(TestCase):
         find_locations.assert_called_once_with('80112')
         self.assertContains(self.client.get('/settings/', {'zip': 'abc'}), 'Enter a 5-digit ZIP code.')
         self.client.post('/settings/store/', {'location_id': '62000123', 'name': 'King Soopers - Arapahoe'})
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(self.home)
         self.assertEqual((household.kroger_location_id, household.kroger_location_name),
                          ('62000123', 'King Soopers - Arapahoe'))
         self.assertEqual(self.client.post('/settings/store/', {'location_id': '../x'}).status_code, 400)
@@ -457,11 +472,12 @@ class CalendarSyncTests(TestCase):
     """The app sets an event's time once, at creation; later syncs never move it."""
 
     def setUp(self):
-        household = HouseholdSettings.load()
+        self.home = make_household('Home')
+        household = HouseholdSettings.load(self.home)
         household.calendar_id = 'dinners@group.calendar.google.com'
         household.save()
-        recipe = Recipe.objects.create(name='Tacos', ingredients=[{'name': 'onion', 'quantity': '1'}])
-        plan = MealPlan.objects.create(week_start=SUNDAY)
+        recipe = Recipe.objects.create(household=self.home, name='Tacos', ingredients=[{'name': 'onion', 'quantity': '1'}])
+        plan = MealPlan.objects.create(household=self.home, week_start=SUNDAY)
         self.meal = PlannedMeal.objects.create(plan=plan, date=date(2026, 10, 26), recipe=recipe)
         self.events = mock.Mock()
         self.events.insert.return_value.execute.return_value = {'id': 'evt1'}
@@ -477,7 +493,7 @@ class CalendarSyncTests(TestCase):
         self.meal.refresh_from_db()
         self.assertEqual(self.meal.calendar_event_id, 'evt1')
 
-        self.meal.recipe = Recipe.objects.create(name='Pho', ingredients=[])
+        self.meal.recipe = Recipe.objects.create(household=self.home, name='Pho', ingredients=[])
         self.meal.save()
         calendar_sync.sync_meal(self.meal)
         self.events.update.assert_not_called()
@@ -558,7 +574,7 @@ class PlannerRequestTests(TestCase):
 
         client = anthropic.Anthropic(api_key='test', http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
         with mock.patch('meals.planner._client', return_value=client):
-            choices = planner.choose_week([(date(2026, 10, 26), 'lunch')], {})
+            choices = planner.choose_week(make_household('Home'), [(date(2026, 10, 26), 'lunch')], {})
         self.assertEqual(choices[0].new_recipe.name, 'Tacos')
         self.assertEqual(seen['body']['output_config']['format']['type'], 'json_schema')
         self.assertEqual(seen['body']['fallbacks'], 'default')
@@ -597,8 +613,8 @@ PIXABAY_HIT = {'pageURL': 'https://pixabay.com/photos/noodles-123/', 'user': 'An
 class RecipePhotoTests(TestCase):
     def setUp(self):
         self.user = User.objects.create(username='mike', email='mike@example.com', first_name='Mike')
-        AllowedUser.objects.create(email='mike@example.com')
-        self.recipe = Recipe.objects.create(name='Peanut Noodles with Edamame and Crunchy Veggies',
+        self.home = make_household('Home', 'mike@example.com')
+        self.recipe = Recipe.objects.create(household=self.home, name='Peanut Noodles with Edamame and Crunchy Veggies',
                                             photo_query='peanut noodles')
 
     def test_search_words_fall_back_to_the_short_name(self):
@@ -624,7 +640,7 @@ class RecipePhotoTests(TestCase):
         self.assertEqual(len(get.calls), 3)  # three queries, once
         self.assertEqual(self.recipe.photo_url, '')
 
-        other = Recipe.objects.create(name='Tacos', photo_query='tacos')
+        other = Recipe.objects.create(household=self.home, name='Tacos', photo_query='tacos')
         with mock.patch('meals.photos.requests.get', side_effect=requests.ConnectionError):
             self.assertFalse(photos.fetch_photo(other))
         other.refresh_from_db()
@@ -638,7 +654,7 @@ class RecipePhotoTests(TestCase):
         with mock.patch('meals.photos._run_in_background', side_effect=queued.append), \
                 mock.patch('meals.photos.requests.get', side_effect=get), \
                 self.captureOnCommitCallbacks(execute=True):
-            plan = services.generate_week(SUNDAY)
+            plan = services.generate_week(self.home, SUNDAY)
             self.assertEqual(get.calls, [])  # nothing fetched while planning
         self.assertEqual(len(queued), 1)
         with mock.patch('meals.photos.requests.get', side_effect=get):
@@ -685,3 +701,189 @@ class RecipePhotoTests(TestCase):
     def test_photo_needs_login(self):
         RecipePhoto.objects.create(recipe=self.recipe, image=b'x')
         self.assertEqual(self.client.get(f'/recipes/{self.recipe.pk}/photo/').status_code, 302)
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend', INTERNAL_API_SECRET='s3cret')
+@mock.patch('meals.calendar_sync.sync_meal')
+@mock.patch('meals.calendar_sync.delete_meal_event')
+@mock.patch('meals.planner.choose_week', side_effect=fake_choose_week)
+class HouseholdTests(TestCase):
+    """Each household has its own menu; someone in two switches between them."""
+
+    def setUp(self):
+        self.user = User.objects.create(username='mike', email='Mike@Example.com', first_name='Mike')
+        self.home = make_household('Home', 'mike@example.com', 'partner@example.com')
+        self.cabin = make_household('Cabin', 'mike@example.com', 'friend@example.com')
+        self.client.force_login(self.user)
+
+    def switch(self, household):
+        return self.client.post('/households/switch/', {'household': household.pk})
+
+    def test_each_household_sees_only_its_own_week_and_recipes(self, *_):
+        home_plan = services.generate_week(self.home, SUNDAY)
+        cabin_recipe = Recipe.objects.create(household=self.cabin, name='Cabin chili')
+        self.switch(self.home)
+        page = self.client.get(f'/plan/{SUNDAY}/')
+        self.assertContains(page, 'Dish Mon')
+        self.assertContains(page, 'aria-label="Household: Home. Switch household"')
+        self.assertNotContains(self.client.get('/recipes/'), 'Cabin chili')
+
+        response = self.switch(self.cabin)
+        self.assertRedirects(response, '/', fetch_redirect_response=False)
+        self.assertEqual(AllowedUser.objects.get(email='mike@example.com').active_household, self.cabin)
+        self.assertNotContains(self.client.get(f'/plan/{SUNDAY}/'), 'Dish Mon')
+        self.assertContains(self.client.get('/recipes/'), 'Cabin chili')
+
+        # Actions on the other household's things are refused while looking at this one.
+        meal = home_plan.meals.first()
+        self.assertEqual(self.client.post(f'/meals/{meal.pk}/lock/').status_code, 404)
+        self.assertEqual(self.client.post(f'/meals/{meal.pk}/remove/').status_code, 404)
+        self.assertEqual(self.client.post(f'/plan/{SUNDAY}/add/', {
+            'date': '2026-10-25', 'meal_type': 'dinner', 'recipe_id': meal.recipe_id}).status_code, 404)
+        self.assertEqual(self.client.post(f'/recipes/{meal.recipe_id}/rate/', {'value': '1'}).status_code, 404)
+        self.assertTrue(home_plan.meals.filter(pk=meal.pk, locked=False).exists())
+
+    def test_a_link_to_another_of_their_households_switches_to_it(self, *_):
+        meal = services.generate_week(self.home, SUNDAY).meals.first()
+        self.switch(self.cabin)
+        # From a calendar event: the meal page follows it into Home.
+        self.assertContains(self.client.get(f'/meals/{meal.pk}/'), meal.recipe.name)
+        self.assertEqual(AllowedUser.objects.get(email='mike@example.com').active_household, self.home)
+        # From the email: ?household= picks the household for a week page.
+        self.switch(self.cabin)
+        self.assertContains(self.client.get(f'/plan/{SUNDAY}/?household={self.home.pk}'), 'Dish Mon')
+
+    def test_no_way_into_a_household_they_are_not_in(self, *_):
+        stranger = make_household('Neighbors', 'friend@example.com')
+        meal = services.generate_week(stranger, SUNDAY).meals.first()
+        self.switch(self.home)
+        self.assertEqual(self.switch(stranger).status_code, 400)
+        self.assertEqual(self.client.get(f'/meals/{meal.pk}/').status_code, 404)
+        self.assertEqual(self.client.get(f'/recipes/{meal.recipe_id}/').status_code, 404)
+        RecipePhoto.objects.create(recipe=meal.recipe, image=b'x')
+        self.assertEqual(self.client.get(f'/recipes/{meal.recipe_id}/photo/').status_code, 404)
+        self.assertNotContains(self.client.get(f'/plan/{SUNDAY}/?household={stranger.pk}'), 'Dish Mon')
+        self.assertEqual(AllowedUser.objects.get(email='mike@example.com').active_household, self.home)
+
+    def test_someone_in_no_household_gets_their_own(self, *_):
+        newcomer = User.objects.create(username='kim', email='kim@example.com')
+        AllowedUser.objects.create(email='kim@example.com', name='Kim')
+        self.client.force_login(newcomer)
+        page = self.client.get(f'/plan/{SUNDAY}/')
+        self.assertContains(page, 'Tell the planner what you like')
+        self.assertNotContains(page, 'Switch household')  # only one household: no switcher
+        self.assertEqual(list(AllowedUser.objects.get(email='kim@example.com').households.values_list('name', flat=True)),
+                         ["Kim's household"])
+
+    def test_signed_in_but_not_allowed_is_forbidden(self, *_):
+        self.client.force_login(User.objects.create(username='admin', email='admin@example.com'))
+        self.assertEqual(self.client.get('/recipes/').status_code, 403)
+
+    def test_settings_and_preferences_are_per_household(self, *_):
+        self.switch(self.home)
+        self.client.post('/preferences/', {'max_minutes': '20', 'notes': 'Nut allergy', 'dislikes': 'olives'})
+        self.switch(self.cabin)
+        self.assertNotContains(self.client.get('/preferences/'), 'Nut allergy')
+        self.assertEqual(HouseholdSettings.load(self.cabin).max_weeknight_minutes, 45)
+        settings_page = self.client.get('/settings/')
+        self.assertContains(settings_page, 'Shared by everyone in Cabin.')
+        self.assertContains(settings_page, 'friend@example.com')
+        self.assertNotContains(settings_page, 'partner@example.com')
+
+        # A member's own dislikes go with them to every household they're in; other people's don't.
+        User.objects.create(username='pat', email='partner@example.com', first_name='Pat')
+        MemberPreferences.objects.create(user=User.objects.get(username='pat'), dislikes='cilantro')
+        members = json.loads(planner._household_context(self.cabin))['preferences']['members']
+        self.assertEqual(members, [{'name': 'Mike', 'loves': [], 'dislikes': ['olives']}])
+        home_context = json.loads(planner._household_context(self.home))
+        self.assertEqual(home_context['household_notes'], 'Nut allergy')
+        self.assertEqual(len(home_context['preferences']['members']), 2)
+
+    def test_planner_context_only_has_this_households_history(self, *_):
+        services.generate_week(self.home, SUNDAY)
+        Recipe.objects.create(household=self.cabin, name='Cabin chili', archived=True)
+        with mock.patch('meals.planner.timezone.localdate', return_value=date(2026, 10, 30)):
+            home = json.loads(planner._household_context(self.home))
+            cabin = json.loads(planner._household_context(self.cabin))
+        self.assertEqual(len(home['known_recipes']), 5)
+        self.assertEqual(len(home['recent_history']), 5)
+        self.assertEqual(home['archived_never_suggest'], [])
+        self.assertEqual((cabin['known_recipes'], cabin['recent_history']), ([], []))
+        self.assertEqual(cabin['archived_never_suggest'], ['Cabin chili'])
+
+    def test_weekly_job_plans_and_emails_every_household(self, choose, *_):
+        headers = {'X-Meal-Planner-Secret': 's3cret'}
+        body = json.dumps({'week_start': SUNDAY.isoformat()})
+        make_household('Empty')  # no members: skipped
+        response = self.client.post('/internal/generate-week/', body, content_type='application/json', headers=headers)
+        self.assertEqual(response.status_code, 200)
+        results = {r['household']: r for r in response.json()['households']}
+        self.assertEqual(sorted(results), ['Cabin', 'Home'])
+        self.assertEqual(results['Home']['emailed'], ['mike@example.com', 'partner@example.com'])
+        self.assertEqual(results['Cabin']['emailed'], ['friend@example.com', 'mike@example.com'])
+        subjects = sorted(m.subject for m in mail.outbox)
+        self.assertEqual(subjects, ['Dinners for the week of Oct 25 · Cabin', 'Dinners for the week of Oct 25 · Home'])
+        home_email = next(m for m in mail.outbox if m.subject.endswith('Home'))
+        self.assertIn(f'?household={self.home.pk}', home_email.alternatives[0][0])
+
+        # One household failing doesn't stop the others, and is reported so Airflow retries.
+        mail.outbox.clear()
+        failing = make_household('Broken', 'friend@example.com')
+        choose.side_effect = lambda home, *a, **k: (_ for _ in ()).throw(RuntimeError('boom')) \
+            if home == failing else fake_choose_week(home, *a, **k)
+        response = self.client.post('/internal/generate-week/', json.dumps({'week_start': '2026-11-01'}),
+                                    content_type='application/json', headers=headers)
+        self.assertEqual(response.status_code, 500)
+        results = {r['household']: r for r in response.json()['households']}
+        self.assertEqual(results['Broken']['error'], 'RuntimeError: boom')
+        self.assertEqual(len(results['Home']['meals']), 5)
+        self.assertEqual(len(mail.outbox), 2)
+
+    @mock.patch('meals.kroger.exchange_code')
+    @mock.patch('meals.kroger.authorize_url', return_value='https://kroger.example/authorize')
+    def test_kroger_connects_to_the_household_it_was_started_from(self, authorize, exchange, *_):
+        self.switch(self.cabin)
+        self.client.get('/kroger/connect/')
+        state = self.client.session['kroger_state']
+        self.switch(self.home)  # switched while away at King Soopers
+        self.client.get('/kroger/callback/', {'state': state, 'code': 'abc'})
+        exchange.assert_called_once_with(self.cabin, 'abc')
+
+
+class HouseholdMigrationTests(TransactionTestCase):
+    """0009 puts a pre-household database into one household, so nobody loses anything on upgrade."""
+
+    def migrate(self, target):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([('meals', target)])
+        return executor.loader.project_state([('meals', target)]).apps
+
+    def test_existing_data_moves_into_one_household(self):
+        old = self.migrate('0007_recipe_photos')
+        AllowedUser = old.get_model('meals', 'AllowedUser')
+        AllowedUser.objects.create(email='michaeldcarrell@gmail.com')
+        AllowedUser.objects.create(email='hannamarie95@gmail.com', receives_plan_email=False)
+        old.get_model('meals', 'HouseholdSettings').objects.create(pk=1, calendar_id='cal@group.calendar.google.com')
+        old.get_model('meals', 'KrogerAuth').objects.create(
+            pk=1, access_token='a', refresh_token='r', expires_at=timezone.now())
+        recipe = old.get_model('meals', 'Recipe').objects.create(name='Tacos')
+        plan = old.get_model('meals', 'MealPlan').objects.create(week_start=SUNDAY)
+        old.get_model('meals', 'PlannedMeal').objects.create(plan=plan, date=SUNDAY, recipe=recipe)
+        old.get_model('meals', 'GroceryProduct').objects.create(grocery_item='onion', upc='1')
+
+        new = self.migrate('0010_household_required')
+        [household] = new.get_model('meals', 'Household').objects.all()
+        self.assertEqual(household.name, 'Home')
+        members = new.get_model('meals', 'Membership').objects.filter(household=household)
+        self.assertEqual(sorted(members.values_list('member__email', 'receives_plan_email')),
+                         [('hannamarie95@gmail.com', False), ('michaeldcarrell@gmail.com', True)])
+        self.assertEqual(set(new.get_model('meals', 'AllowedUser').objects.values_list('active_household', flat=True)),
+                         {household.pk})
+        for name in ('HouseholdSettings', 'KrogerAuth', 'MealPlan', 'Recipe', 'GroceryProduct'):
+            self.assertEqual(list(new.get_model('meals', name).objects.values_list('household', flat=True)),
+                             [household.pk], name)
+        self.assertEqual(new.get_model('meals', 'HouseholdSettings').objects.get().calendar_id,
+                         'cal@group.calendar.google.com')

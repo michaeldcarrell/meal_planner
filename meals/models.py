@@ -8,14 +8,79 @@ from django.urls import reverse
 from django.utils import timezone
 
 
+class Household(models.Model):
+    """A group of people who share one menu: its plans, recipes, settings, store and King Soopers account.
+    Members are AllowedUsers (via Membership); someone can belong to several and switch between them."""
+    name = models.CharField(max_length=100)
+    members = models.ManyToManyField('AllowedUser', through='Membership', related_name='households')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name', 'pk']
+
+    def __str__(self):
+        return self.name
+
+    def member_users(self):
+        """The Django users (people who have signed in) who belong to this household."""
+        from django.contrib.auth import get_user_model
+        query = models.Q()
+        for email in self.members.values_list('email', flat=True):
+            query |= models.Q(email__iexact=email)
+        return get_user_model().objects.filter(query) if query else get_user_model().objects.none()
+
+
 class AllowedUser(models.Model):
-    """Who may sign in (Google login is checked against this list) and who gets the weekly email."""
+    """Who may sign in (Google login is checked against this list), and which household they're looking at."""
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=100, blank=True)
-    receives_plan_email = models.BooleanField(default=True)
+    # The household the app shows them; switched from the account menu. Kept here (not in the session)
+    # so it follows them across devices.
+    active_household = models.ForeignKey(
+        Household, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
 
     def __str__(self):
         return self.name or self.email
+
+    @classmethod
+    def for_user(cls, user):
+        if not getattr(user, 'email', ''):
+            return None
+        return cls.objects.filter(email__iexact=user.email).first()
+
+    def current_household(self) -> Household:
+        """The household they last switched to, else their first one. Someone in no household gets
+        their own, so every allowed user can plan."""
+        households = self.households.all()
+        household = households.filter(pk=self.active_household_id).first() if self.active_household_id else None
+        if household is None:
+            household = households.first()
+        if household is None:
+            household = Household.objects.create(name=f"{self.name or self.email.split('@')[0]}'s household")
+            Membership.objects.create(household=household, member=self)
+        if household.pk != self.active_household_id:
+            self.active_household = household
+            self.save(update_fields=['active_household'])
+        return household
+
+    def switch_to(self, household: Household):
+        if not self.households.filter(pk=household.pk).exists():
+            raise ValueError(f'{self} is not in {household}.')
+        self.active_household = household
+        self.save(update_fields=['active_household'])
+
+
+class Membership(models.Model):
+    household = models.ForeignKey(Household, related_name='memberships', on_delete=models.CASCADE)
+    member = models.ForeignKey(AllowedUser, related_name='memberships', on_delete=models.CASCADE)
+    receives_plan_email = models.BooleanField(default=True, help_text="Gets this household's weekly plan email.")
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['household', 'member'], name='one_membership_per_household')]
+
+    def __str__(self):
+        return f'{self.member} in {self.household}'
 
 
 # Meal types in the order they're eaten. The schedule and PlannedMeal store the key.
@@ -63,7 +128,8 @@ MEAL_STYLES = [
 
 
 class HouseholdSettings(models.Model):
-    """Singleton (pk=1) of planning knobs, edited in /admin/."""
+    """One household's planning knobs: the Preferences and Settings pages set most; the rest is in /admin/."""
+    household = models.OneToOneField(Household, on_delete=models.CASCADE, related_name='planning')
     # Which days get which meals, set on the Preferences page: {"dinner": [0, 1, 2], ...}, Monday=0 ... Sunday=6.
     meal_schedule = models.JSONField(default=default_meal_schedule, blank=True)
     servings = models.PositiveSmallIntegerField(default=4)
@@ -96,11 +162,11 @@ class HouseholdSettings(models.Model):
         verbose_name_plural = 'household settings'
 
     def __str__(self):
-        return 'Household settings'
+        return f'{self.household} settings'
 
     @classmethod
-    def load(cls):
-        obj, created = cls.objects.get_or_create(pk=1)
+    def load(cls, household: Household):
+        obj, created = cls.objects.get_or_create(household=household)
         if created:
             obj.refresh_from_db()  # field defaults like dinner_time='17:30' come back as real types
         return obj
@@ -165,6 +231,8 @@ def _split_inline_steps(line: str) -> list[str]:
 
 
 class Recipe(models.Model):
+    """A dish in one household's library; its ratings, swaps and archive flag belong to that household too."""
+    household = models.ForeignKey(Household, related_name='recipes', on_delete=models.CASCADE)
     name = models.CharField(max_length=200)
     summary = models.TextField(blank=True)
     cuisine = models.CharField(max_length=60, blank=True)
@@ -258,7 +326,8 @@ class RecipePhoto(models.Model):
 
 
 class MealPlan(models.Model):
-    week_start = models.DateField(unique=True, help_text='The Sunday this plan starts on.')
+    household = models.ForeignKey(Household, related_name='plans', on_delete=models.CASCADE)
+    week_start = models.DateField(help_text='The Sunday this plan starts on.')
     created_at = models.DateTimeField(auto_now_add=True)
     emailed_at = models.DateTimeField(null=True, blank=True)
     # This week's changes to the household schedule: {"2026-10-26:dinner": false, "2026-10-31:lunch": true}.
@@ -273,6 +342,7 @@ class MealPlan(models.Model):
 
     class Meta:
         ordering = ['-week_start']
+        constraints = [models.UniqueConstraint(fields=['household', 'week_start'], name='one_plan_per_week')]
 
     def __str__(self):
         return f'Week of {self.week_start:%b %-d, %Y}'
@@ -292,10 +362,6 @@ class MealPlan(models.Model):
     @staticmethod
     def slot_key(day: date, meal_type: str) -> str:
         return f'{day.isoformat()}:{meal_type}'
-
-    @classmethod
-    def current(cls):
-        return cls.objects.filter(week_start=week_start_for(timezone.localdate())).first()
 
 
 class PlannedMeal(models.Model):
@@ -328,7 +394,8 @@ class MealSwap(models.Model):
 
 
 class KrogerAuth(models.Model):
-    """Singleton (pk=1) holding the household's Kroger OAuth tokens (cart write access)."""
+    """A household's Kroger OAuth tokens (cart write access); whoever connected it is whose cart gets filled."""
+    household = models.OneToOneField(Household, on_delete=models.CASCADE, related_name='kroger_auth')
     access_token = models.TextField()
     refresh_token = models.TextField()
     expires_at = models.DateTimeField()
@@ -337,9 +404,13 @@ class KrogerAuth(models.Model):
 
 class GroceryProduct(models.Model):
     """Remembered Kroger product for a grocery item, so the same item maps to the same UPC every week."""
-    grocery_item = models.CharField(max_length=200, unique=True)
+    household = models.ForeignKey(Household, related_name='grocery_products', on_delete=models.CASCADE)
+    grocery_item = models.CharField(max_length=200)
     upc = models.CharField(max_length=20)
     description = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['household', 'grocery_item'], name='one_product_per_item')]
 
     def __str__(self):
         return f'{self.grocery_item} → {self.description or self.upc}'

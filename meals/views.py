@@ -11,6 +11,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Sum
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -18,21 +19,81 @@ from django.views.decorators.csrf import csrf_exempt
 
 from meals import calendar_sync, kroger, photos, services
 from meals.models import (
-    COOK_TIMES, CUISINES, MEAL_SCHEDULE_PRESETS, MEAL_STYLES, MEAL_TYPES, PLAN_WEEKDAYS, PROTEIN_LEVELS, PROTEINS, HouseholdSettings, KrogerAuth, MealPlan,
-    MemberPreferences, PlannedMeal, Rating, Recipe, RecipePhoto, week_start_for,
+    COOK_TIMES, CUISINES, MEAL_SCHEDULE_PRESETS, MEAL_STYLES, MEAL_TYPES, PLAN_WEEKDAYS, PROTEIN_LEVELS, PROTEINS,
+    AllowedUser, Household, HouseholdSettings, KrogerAuth, MealPlan, MemberPreferences, PlannedMeal, Rating, Recipe,
+    RecipePhoto, week_start_for,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _plan_or_404(week_start: str) -> MealPlan:
+class HouseholdMixin(LoginRequiredMixin):
+    """Signed in, on the allowed list, and looking at one of their households.
+
+    Sets `request.member` (their AllowedUser) and `request.household`; every page and action works on
+    that household only. A `?household=<id>` (on links in the weekly email) switches to that household
+    first, if they belong to it.
+    """
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        member = AllowedUser.for_user(request.user)
+        if member is None:
+            return HttpResponseForbidden(render_to_string('forbidden.html', request=request))
+        request.member = member
+        wanted = request.GET.get('household', '')
+        household = member.households.filter(pk=wanted).first() if wanted.isdigit() else None
+        if household:
+            member.switch_to(household)
+        request.household = household or member.current_household()
+        return super().dispatch(request, *args, **kwargs)
+
+
+def _switch(request, household: Household):
+    request.member.switch_to(household)
+    request.household = household
+    messages.info(request, f'Switched to {household.name}.')
+
+
+def _meal_or_404(request, pk, follow=False) -> PlannedMeal:
+    """A meal in the current household. With `follow` (pages people reach from a calendar event or email),
+    a meal in another of their households switches them to it instead of a 404."""
+    meals = PlannedMeal.objects.select_related('recipe', 'plan__household')
+    meal = meals.filter(pk=pk, plan__household=request.household).first()
+    if meal is None and follow:
+        meal = meals.filter(pk=pk, plan__household__in=request.member.households.all()).first()
+        if meal:
+            _switch(request, meal.plan.household)
+    if meal is None:
+        raise Http404()
+    return meal
+
+
+def _recipe_or_404(request, pk, follow=False, **filters) -> Recipe:
+    """A recipe in the current household's library (see _meal_or_404 for `follow`)."""
+    recipe = Recipe.objects.filter(pk=pk, household=request.household, **filters).first()
+    if recipe is None and follow:
+        recipe = Recipe.objects.filter(pk=pk, household__in=request.member.households.all(), **filters).first()
+        if recipe:
+            _switch(request, recipe.household)
+    if recipe is None:
+        raise Http404()
+    return recipe
+
+
+def _plan_or_404(request, week_start: str) -> MealPlan:
     try:
-        return get_object_or_404(MealPlan, week_start=date.fromisoformat(week_start))
+        return get_object_or_404(MealPlan, household=request.household, week_start=date.fromisoformat(week_start))
     except ValueError:
         raise Http404()
 
 
-class Index(LoginRequiredMixin, View):
+def _favorites(household):
+    return (Recipe.objects.filter(household=household, archived=False).annotate(total=Sum('ratings__value'))
+            .filter(total__gt=0).order_by('name'))
+
+
+class Index(HouseholdMixin, View):
     def get(self, request):
         return redirect('plan', week_start_for(timezone.localdate()).isoformat())
 
@@ -43,19 +104,19 @@ class Logout(View):
         return redirect('/')
 
 
-def _setup_steps() -> list[dict] | None:
+def _setup_steps(home: Household) -> list[dict] | None:
     """First-run checklist for the week page, or None once everything is done."""
-    household = HouseholdSettings.load()
+    household = HouseholdSettings.load(home)
     steps = [
         {'label': 'Tell the planner what you like', 'done': household.preferences_updated_at is not None,
          'hint': 'Cooking time, proteins, cuisines, and foods anyone won\'t eat.', 'url': '/preferences/'},
-        {'label': 'Connect your King Soopers account', 'done': kroger.is_connected(),
+        {'label': 'Connect your King Soopers account', 'done': kroger.is_connected(home),
          'hint': 'So the grocery list can fill your cart.', 'url': '/settings/#kroger'},
         {'label': 'Choose your King Soopers store', 'done': bool(household.kroger_location_id),
          'hint': 'Products and prices come from this store.', 'url': '/settings/#store'},
         {'label': 'Connect a Google Calendar', 'done': bool(household.calendar_id),
          'hint': 'Each meal shows up as an event with the recipe.', 'url': '/settings/#calendar'},
-        {'label': 'Plan your first week', 'done': MealPlan.objects.filter(meals__isnull=False).exists(),
+        {'label': 'Plan your first week', 'done': home.plans.filter(meals__isnull=False).exists(),
          'hint': 'Meals go on the calendar and the grocery list is built from them.', 'url': None},
     ]
     return None if all(step['done'] for step in steps) else steps
@@ -67,25 +128,24 @@ def _move_options(meal: PlannedMeal, meals) -> list[tuple]:
     return [(day, taken.get(day)) for day in meal.plan.days if day != meal.date]
 
 
-class PlanView(LoginRequiredMixin, View):
+class PlanView(HouseholdMixin, View):
     def get(self, request, week_start):
         try:
             start = week_start_for(date.fromisoformat(week_start))
         except ValueError:
             raise Http404()
-        plan = MealPlan.objects.filter(week_start=start).first()
+        plan = MealPlan.objects.filter(household=request.household, week_start=start).first()
         meals = list(plan.meals.select_related('recipe')) if plan else []
         for meal in meals:
             meal.my_rating = meal.recipe.rating_for(request.user)
             meal.votes = list(meal.recipe.ratings.select_related('user'))
-        favorites = list(Recipe.objects.filter(archived=False).annotate(total=Sum('ratings__value'))
-                         .filter(total__gt=0).order_by('name'))
+        favorites = list(_favorites(request.household))
         for meal in meals:
             meal.swap_favorites = [r for r in favorites if r.pk != meal.recipe_id]
             meal.move_options = _move_options(meal, meals)
         minutes = [m.recipe.total_minutes for m in meals if m.recipe.total_minutes]
         return render(request, 'meals/plan.html', {
-            'setup_steps': _setup_steps(),
+            'setup_steps': _setup_steps(request.household),
             'plan': plan,
             'generating': bool(plan and plan.is_generating),
             'week_start': start,
@@ -104,12 +164,12 @@ class PlanView(LoginRequiredMixin, View):
         })
 
 
-class GeneratePlan(LoginRequiredMixin, View):
+class GeneratePlan(HouseholdMixin, View):
     def post(self, request, week_start):
         start = date.fromisoformat(week_start)
         regenerate = request.POST.get('regenerate') == '1'
         try:
-            services.generate_week(start, regenerate=regenerate)
+            services.generate_week(request.household, start, regenerate=regenerate)
             messages.success(request, 'Plan regenerated.' if regenerate else 'Plan created.')
         except services.PlanBusy:
             messages.info(request, 'This week is already being planned; it will show up here when it\'s done.')
@@ -119,32 +179,31 @@ class GeneratePlan(LoginRequiredMixin, View):
         return redirect('plan', week_start)
 
 
-class PlanStatus(LoginRequiredMixin, View):
+class PlanStatus(HouseholdMixin, View):
     """Polled by the week page while a plan is being generated, so it can reload when it's ready."""
     def get(self, request, week_start):
-        plan = _plan_or_404(week_start)
+        plan = _plan_or_404(request, week_start)
         return JsonResponse({'generating': plan.is_generating})
 
 
-class EmailPlan(LoginRequiredMixin, View):
+class EmailPlan(HouseholdMixin, View):
     def post(self, request, week_start):
-        plan = _plan_or_404(week_start)
+        plan = _plan_or_404(request, week_start)
         sent_to = services.send_plan_email(plan)
         messages.success(request, f"Emailed {', '.join(sent_to)}." if sent_to else 'No email recipients configured.')
         return redirect('plan', week_start)
 
 
-class MealDetail(LoginRequiredMixin, View):
+class MealDetail(HouseholdMixin, View):
     def get(self, request, pk):
-        meal = get_object_or_404(PlannedMeal.objects.select_related('recipe', 'plan'), pk=pk)
+        meal = _meal_or_404(request, pk, follow=True)
         meal.move_options = _move_options(meal, meal.plan.meals.select_related('recipe'))
         return render(request, 'meals/meal_detail.html', {
             'meal': meal,
             'recipe': meal.recipe,
             'my_rating': meal.recipe.ratings.filter(user=request.user).first(),
             'votes': meal.recipe.ratings.select_related('user'),
-            'favorites': Recipe.objects.filter(archived=False).annotate(total=Sum('ratings__value'))
-                .filter(total__gt=0).exclude(pk=meal.recipe_id).order_by('name'),
+            'favorites': _favorites(request.household).exclude(pk=meal.recipe_id),
         })
 
 
@@ -153,9 +212,9 @@ def _back(request, fallback):
     return redirect(target if target.startswith('/') and not target.startswith('//') else fallback)
 
 
-class RateRecipe(LoginRequiredMixin, View):
+class RateRecipe(HouseholdMixin, View):
     def post(self, request, pk):
-        recipe = get_object_or_404(Recipe, pk=pk)
+        recipe = _recipe_or_404(request, pk)
         try:
             value = int(request.POST['value'])
         except (KeyError, ValueError):
@@ -171,14 +230,14 @@ class RateRecipe(LoginRequiredMixin, View):
         return _back(request, f'/recipes/{recipe.pk}/')
 
 
-class ReplaceMeal(LoginRequiredMixin, View):
+class ReplaceMeal(HouseholdMixin, View):
     def post(self, request, pk):
-        meal = get_object_or_404(PlannedMeal.objects.select_related('plan', 'recipe'), pk=pk)
+        meal = _meal_or_404(request, pk)
         old_name = meal.recipe.name
         recipe_id = request.POST.get('recipe_id')
         try:
             if recipe_id:
-                recipe = get_object_or_404(Recipe, pk=recipe_id, archived=False)
+                recipe = _recipe_or_404(request, recipe_id, archived=False)
                 services.replace_with_recipe(meal, recipe, request.user)
             else:
                 services.replace_with_suggestion(meal, request.user, request.POST.get('hint', '').strip())
@@ -189,10 +248,10 @@ class ReplaceMeal(LoginRequiredMixin, View):
         return _back(request, f'/plan/{meal.plan.week_start.isoformat()}/')
 
 
-class AddMeal(LoginRequiredMixin, View):
+class AddMeal(HouseholdMixin, View):
     """Add one meal to this week only, either a favorite or one Claude suggests."""
     def post(self, request, week_start):
-        plan = _plan_or_404(week_start)
+        plan = _plan_or_404(request, week_start)
         meal_type = request.POST.get('meal_type', '')
         try:
             day = date.fromisoformat(request.POST.get('date', ''))
@@ -201,7 +260,7 @@ class AddMeal(LoginRequiredMixin, View):
         if meal_type not in dict(MEAL_TYPES):
             return HttpResponseBadRequest()
         recipe_id = request.POST.get('recipe_id')
-        recipe = get_object_or_404(Recipe, pk=recipe_id, archived=False) if recipe_id else None
+        recipe = _recipe_or_404(request, recipe_id, archived=False) if recipe_id else None
         try:
             meal = services.add_meal(plan, day, meal_type, request.user, recipe=recipe,
                                      hint=request.POST.get('hint', '').strip()[:300])
@@ -213,9 +272,9 @@ class AddMeal(LoginRequiredMixin, View):
         return redirect('plan', week_start)
 
 
-class MoveMeal(LoginRequiredMixin, View):
+class MoveMeal(HouseholdMixin, View):
     def post(self, request, pk):
-        meal = get_object_or_404(PlannedMeal.objects.select_related('plan', 'recipe'), pk=pk)
+        meal = _meal_or_404(request, pk)
         try:
             day = date.fromisoformat(request.POST.get('date', ''))
         except ValueError:
@@ -230,33 +289,33 @@ class MoveMeal(LoginRequiredMixin, View):
         return redirect(f'/plan/{meal.plan.week_start.isoformat()}/#meal-{moved.pk}')
 
 
-class RemoveMeal(LoginRequiredMixin, View):
+class RemoveMeal(HouseholdMixin, View):
     def post(self, request, pk):
-        meal = get_object_or_404(PlannedMeal.objects.select_related('plan', 'recipe'), pk=pk)
+        meal = _meal_or_404(request, pk)
         week_start = meal.plan.week_start.isoformat()
         services.remove_meal(meal)
         messages.success(request, f'Removed {meal.recipe.name} from {meal.date:%A}. It won\'t be re-planned this week.')
         return redirect('plan', week_start)
 
 
-class ToggleLock(LoginRequiredMixin, View):
+class ToggleLock(HouseholdMixin, View):
     def post(self, request, pk):
-        meal = get_object_or_404(PlannedMeal, pk=pk)
+        meal = _meal_or_404(request, pk)
         meal.locked = not meal.locked
         meal.save(update_fields=['locked'])
         return _back(request, f'/plan/{meal.plan.week_start.isoformat()}/')
 
 
-class RecipeList(LoginRequiredMixin, View):
+class RecipeList(HouseholdMixin, View):
     def get(self, request):
-        recipes = (Recipe.objects.annotate(total=Sum('ratings__value'), times=Count('planned_meals', distinct=True))
+        recipes = (Recipe.objects.filter(household=request.household).annotate(total=Sum('ratings__value'), times=Count('planned_meals', distinct=True))
                    .order_by('archived', '-total', 'name'))
         return render(request, 'meals/recipes.html', {'recipes': recipes})
 
 
-class RecipeDetail(LoginRequiredMixin, View):
+class RecipeDetail(HouseholdMixin, View):
     def get(self, request, pk):
-        recipe = get_object_or_404(Recipe, pk=pk)
+        recipe = _recipe_or_404(request, pk, follow=True)
         return render(request, 'meals/recipe_detail.html', {
             'recipe': recipe,
             'my_rating': recipe.ratings.filter(user=request.user).first(),
@@ -265,18 +324,19 @@ class RecipeDetail(LoginRequiredMixin, View):
         })
 
 
-class RecipePhotoView(LoginRequiredMixin, View):
+class RecipePhotoView(HouseholdMixin, View):
     """The photo itself. Its URL carries a version (Recipe.photo_url), so browsers can keep it."""
     def get(self, request, pk):
-        photo = get_object_or_404(RecipePhoto, recipe_id=pk)
+        # Any of their households: the URL is cached, so it mustn't depend on which one they're looking at.
+        photo = get_object_or_404(RecipePhoto, recipe_id=pk, recipe__household__in=request.member.households.all())
         response = HttpResponse(bytes(photo.image), content_type=photo.content_type)
         response['Cache-Control'] = 'private, max-age=31536000, immutable'
         return response
 
 
-class RecipePhotoUpload(LoginRequiredMixin, View):
+class RecipePhotoUpload(HouseholdMixin, View):
     def post(self, request, pk):
-        recipe = get_object_or_404(Recipe, pk=pk)
+        recipe = _recipe_or_404(request, pk)
         if request.POST.get('remove'):
             photos.remove_photo(recipe)
             messages.success(request, 'Photo removed.')
@@ -291,28 +351,28 @@ class RecipePhotoUpload(LoginRequiredMixin, View):
         return _back(request, f'/recipes/{recipe.pk}/')
 
 
-class ToggleArchive(LoginRequiredMixin, View):
+class ToggleArchive(HouseholdMixin, View):
     def post(self, request, pk):
-        recipe = get_object_or_404(Recipe, pk=pk)
+        recipe = _recipe_or_404(request, pk)
         recipe.archived = not recipe.archived
         recipe.save(update_fields=['archived'])
         messages.success(request, f"{recipe.name} {'will no longer be suggested' if recipe.archived else 'can be suggested again'}.")
         return redirect('recipe_detail', pk)
 
 
-class Groceries(LoginRequiredMixin, View):
+class Groceries(HouseholdMixin, View):
     def get(self, request, week_start):
-        plan = _plan_or_404(week_start)
+        plan = _plan_or_404(request, week_start)
         return render(request, 'meals/groceries.html', {
             'plan': plan,
             'items': services.grocery_list(plan),
-            'kroger_connected': kroger.is_connected(),
-            'store_set': bool(HouseholdSettings.load().kroger_location_id),
+            'kroger_connected': kroger.is_connected(request.household),
+            'store_set': bool(HouseholdSettings.load(request.household).kroger_location_id),
             'last_push': plan.cart_pushes.order_by('-created_at').first(),
         })
 
     def post(self, request, week_start):
-        plan = _plan_or_404(week_start)
+        plan = _plan_or_404(request, week_start)
         items = request.POST.getlist('item')
         if not items:
             messages.error(request, 'Nothing selected.')
@@ -329,20 +389,20 @@ class Groceries(LoginRequiredMixin, View):
         return redirect('groceries', week_start)
 
 
-class CurrentGroceries(LoginRequiredMixin, View):
+class CurrentGroceries(HouseholdMixin, View):
     """The tab bar's Groceries link: this week's list, or the week page if nothing is planned yet."""
     def get(self, request):
         start = week_start_for(timezone.localdate())
-        if not MealPlan.objects.filter(week_start=start, meals__isnull=False).exists():
+        if not request.household.plans.filter(week_start=start, meals__isnull=False).exists():
             messages.error(request, 'Plan this week first; the grocery list comes from its meals.')
             return redirect('plan', start.isoformat())
         return redirect('groceries', start.isoformat())
 
 
-class PreferencesView(LoginRequiredMixin, View):
+class PreferencesView(HouseholdMixin, View):
     """What the household likes (shared) and what each member loves or won't eat (their own)."""
     def get(self, request):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(request.household)
         mine = MemberPreferences.objects.filter(user=request.user).first()
         proteins = household.protein_preferences or {}
         schedule = household.schedule
@@ -358,11 +418,12 @@ class PreferencesView(LoginRequiredMixin, View):
             'cuisines': CUISINES,
             'styles': MEAL_STYLES,
             'mine': mine,
-            'others': MemberPreferences.objects.exclude(user=request.user).select_related('user'),
+            'others': MemberPreferences.objects.filter(user__in=request.household.member_users())
+                .exclude(user=request.user).select_related('user'),
         })
 
     def post(self, request):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(request.household)
         schedule = {
             key: sorted({int(d) for d in request.POST.getlist(f'days_{key}') if d in '0123456' and len(d) == 1})
             for key, _ in MEAL_TYPES
@@ -395,10 +456,10 @@ class PreferencesView(LoginRequiredMixin, View):
         return redirect('preferences')
 
 
-class SettingsView(LoginRequiredMixin, View):
+class SettingsView(HouseholdMixin, View):
     """King Soopers connection and store, reachable before any plan exists."""
     def get(self, request):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(request.household)
         zip_code = request.GET.get('zip', '').strip()
         stores, store_error = [], ''
         if zip_code:
@@ -414,10 +475,11 @@ class SettingsView(LoginRequiredMixin, View):
                     store_error = f'No stores found near {zip_code}.'
         return render(request, 'meals/settings.html', {
             'household': household,
-            'kroger_auth': KrogerAuth.objects.filter(pk=1).first(),
+            'kroger_auth': KrogerAuth.objects.filter(household=request.household).first(),
             'calendar_bot': calendar_sync.service_account_email(),
-            'current_plan': MealPlan.objects.filter(week_start=week_start_for(timezone.localdate()),
-                                                    meals__isnull=False).first(),
+            'current_plan': request.household.plans.filter(week_start=week_start_for(timezone.localdate()),
+                                                           meals__isnull=False).first(),
+            'members': request.household.memberships.select_related('member').order_by('member__email'),
             'zip': zip_code,
             'stores': stores,
             'store_error': store_error,
@@ -434,12 +496,12 @@ def _store_summary(loc: dict) -> dict:
     }
 
 
-class ChooseStore(LoginRequiredMixin, View):
+class ChooseStore(HouseholdMixin, View):
     def post(self, request):
         location_id = request.POST.get('location_id', '').strip()
         if not (location_id.isalnum() and len(location_id) <= 20):
             return HttpResponseBadRequest()
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(request.household)
         household.kroger_location_id = location_id
         household.kroger_location_name = request.POST.get('name', '').strip()[:200]
         household.save(update_fields=['kroger_location_id', 'kroger_location_name'])
@@ -447,9 +509,9 @@ class ChooseStore(LoginRequiredMixin, View):
         return redirect('/settings/#store')
 
 
-class SetCalendar(LoginRequiredMixin, View):
+class SetCalendar(HouseholdMixin, View):
     def post(self, request):
-        household = HouseholdSettings.load()
+        household = HouseholdSettings.load(request.household)
         calendar_id = '' if request.POST.get('disconnect') else request.POST.get('calendar_id', '').strip()
         if calendar_id:
             if len(calendar_id) > 255:
@@ -463,7 +525,7 @@ class SetCalendar(LoginRequiredMixin, View):
         if not calendar_id:
             messages.success(request, 'Calendar disconnected. Meals will no longer be added.')
             return redirect('/settings/#calendar')
-        plan = MealPlan.objects.filter(week_start=week_start_for(timezone.localdate())).first()
+        plan = request.household.plans.filter(week_start=week_start_for(timezone.localdate())).first()
         synced, failed = services.sync_plan_calendar(plan) if plan else (0, 0)
         messages.success(request, 'Calendar connected.' + (f' Added {synced} meals from this week.' if synced else ''))
         if failed:
@@ -471,10 +533,10 @@ class SetCalendar(LoginRequiredMixin, View):
         return redirect('/settings/#calendar')
 
 
-class SyncCalendar(LoginRequiredMixin, View):
+class SyncCalendar(HouseholdMixin, View):
     def post(self, request):
-        plan = MealPlan.objects.filter(week_start=week_start_for(timezone.localdate())).first()
-        if not plan or not HouseholdSettings.load().calendar_id:
+        plan = request.household.plans.filter(week_start=week_start_for(timezone.localdate())).first()
+        if not plan or not HouseholdSettings.load(request.household).calendar_id:
             return redirect('/settings/#calendar')
         synced, failed = services.sync_plan_calendar(plan)
         if failed:
@@ -484,15 +546,17 @@ class SyncCalendar(LoginRequiredMixin, View):
         return redirect('/settings/#calendar')
 
 
-class KrogerConnect(LoginRequiredMixin, View):
+class KrogerConnect(HouseholdMixin, View):
     def get(self, request):
         state = secrets.token_urlsafe(24)
         request.session['kroger_state'] = state
+        # The account is saved to the household they started from, even if they switch mid-way.
+        request.session['kroger_household'] = request.household.pk
         request.session['kroger_next'] = request.GET.get('next', '/settings/')
         return redirect(kroger.authorize_url(state))
 
 
-class KrogerCallback(LoginRequiredMixin, View):
+class KrogerCallback(HouseholdMixin, View):
     def get(self, request):
         expected = request.session.pop('kroger_state', None)
         if not expected or not hmac.compare_digest(expected, request.GET.get('state', '')):
@@ -500,18 +564,35 @@ class KrogerCallback(LoginRequiredMixin, View):
         if 'code' not in request.GET:
             messages.error(request, f"King Soopers connection cancelled: {request.GET.get('error', 'unknown')}")
         else:
-            kroger.exchange_code(request.GET['code'])
-            messages.success(request, 'King Soopers account connected.')
+            household = request.member.households.filter(pk=request.session.pop('kroger_household', None)).first()
+            if household is None:
+                return HttpResponseForbidden('Start connecting from the Settings page again.')
+            kroger.exchange_code(household, request.GET['code'])
+            messages.success(request, f'King Soopers account connected for {household.name}.')
         next_url = request.session.pop('kroger_next', '/')
         return redirect(next_url if next_url.startswith('/') and not next_url.startswith('//') else '/')
 
 
+class SwitchHousehold(HouseholdMixin, View):
+    """Show another of their households. Goes to its week page, since the page they were on (a meal or
+    recipe) belongs to the household they're leaving."""
+    def post(self, request):
+        household = request.member.households.filter(pk=request.POST.get('household', '')).first()
+        if household is None:
+            return HttpResponseBadRequest()
+        if household != request.household:
+            _switch(request, household)
+        return redirect('index')
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class InternalGenerateWeek(View):
-    """Called by the Airflow DAG every Sunday: build this week's plan and email it.
+    """Called by the Airflow DAG every Sunday: build this week's plan for every household and email it.
 
-    Auth is the shared `X-Meal-Planner-Secret` header. Safe to re-run: existing meals are kept
-    and the email only goes out once per plan unless `force_email` is set.
+    Auth is the shared `X-Meal-Planner-Secret` header. `household` (an id) limits it to one. Safe to
+    re-run: existing meals are kept and each plan's email only goes out once unless `force_email` is set.
+    One household failing doesn't stop the rest; the response is then a 500 (so Airflow retries, which
+    only redoes what's missing) listing what failed.
     """
     def post(self, request):
         secret = request.headers.get('X-Meal-Planner-Secret', '')
@@ -519,13 +600,26 @@ class InternalGenerateWeek(View):
             return HttpResponseForbidden()
         body = json.loads(request.body or b'{}')
         start = date.fromisoformat(body['week_start']) if body.get('week_start') else None
-        plan = services.generate_week(start)
-        sent_to = []
-        if plan.emailed_at is None or body.get('force_email'):
-            sent_to = services.send_plan_email(plan)
-        return JsonResponse({
-            'week_start': plan.week_start.isoformat(),
-            'meals': [{'date': m.date.isoformat(), 'meal_type': m.meal_type, 'recipe': m.recipe.name}
-                      for m in plan.meals.select_related('recipe')],
-            'emailed': sent_to,
-        })
+        households = services.households_to_plan()
+        if body.get('household'):
+            households = households.filter(pk=body['household'])
+        results, failed = [], False
+        for household in households:
+            result = {'household': household.name, 'household_id': household.pk}
+            try:
+                plan = services.generate_week(household, start)
+                sent_to = []
+                if plan.emailed_at is None or body.get('force_email'):
+                    sent_to = services.send_plan_email(plan)
+                result.update({
+                    'week_start': plan.week_start.isoformat(),
+                    'meals': [{'date': m.date.isoformat(), 'meal_type': m.meal_type, 'recipe': m.recipe.name}
+                              for m in plan.meals.select_related('recipe')],
+                    'emailed': sent_to,
+                })
+            except Exception as e:
+                logger.exception('Weekly plan failed for household %s', household.pk)
+                result['error'] = f'{type(e).__name__}: {e}'
+                failed = True
+            results.append(result)
+        return JsonResponse({'households': results}, status=500 if failed else 200)

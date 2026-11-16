@@ -1,4 +1,4 @@
-"""Mirror PlannedMeals onto a shared Google Calendar via a service account."""
+"""Mirror PlannedMeals onto each household's shared Google Calendar via a service account."""
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -71,7 +71,7 @@ def sync_meal(meal: PlannedMeal):
     The time is set only when the event is created. Later syncs patch just the content, so a
     meal moved (or given guests, reminders, a colour) in Google Calendar stays that way.
     """
-    household = HouseholdSettings.load()
+    household = HouseholdSettings.load(meal.plan.household)
     if not household.calendar_id:
         return
     events = _service().events()
@@ -109,7 +109,7 @@ def _shift(when: dict, days: int) -> dict:
 def move_meal_event(meal: PlannedMeal, days: int):
     """Move the meal's event `days` days (after its date changed), keeping the time and length it has
     in Google Calendar. An event that's missing is recreated at the household's default time."""
-    household = HouseholdSettings.load()
+    household = HouseholdSettings.load(meal.plan.household)
     if not household.calendar_id:
         return
     if meal.calendar_event_id:
@@ -129,7 +129,7 @@ def move_meal_event(meal: PlannedMeal, days: int):
 
 
 def delete_meal_event(meal: PlannedMeal):
-    household = HouseholdSettings.load()
+    household = HouseholdSettings.load(meal.plan.household)
     if not (household.calendar_id and meal.calendar_event_id):
         return
     try:

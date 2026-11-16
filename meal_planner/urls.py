@@ -31,6 +31,7 @@ urlpatterns = [
     path("settings/store/", views.ChooseStore.as_view(), name="choose_store"),
     path("settings/calendar/", views.SetCalendar.as_view(), name="set_calendar"),
     path("settings/calendar/sync/", views.SyncCalendar.as_view(), name="sync_calendar"),
+    path("households/switch/", views.SwitchHousehold.as_view(), name="switch_household"),
     path("kroger/connect/", views.KrogerConnect.as_view(), name="kroger_connect"),
     path("kroger/callback/", views.KrogerCallback.as_view(), name="kroger_callback"),
     path("internal/generate-week/", views.InternalGenerateWeek.as_view(), name="internal_generate_week"),

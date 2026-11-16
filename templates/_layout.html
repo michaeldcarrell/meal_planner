@@ -20,6 +20,28 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="6.5"></circle><path d="M2.5 3v6a2 2 0 0 0 2 2M4.5 3v18M21.5 3c-1.7 0-2.5 2-2.5 5v4h2.5M21.5 3v18"></path></svg>
         MEAL PLANNER
     </a>
+    {% if my_households|length > 1 %}
+    <div class="dropdown">
+        <button type="button" class="household-button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Household: {{ current_household.name }}. Switch household">
+            <span class="household-name">{{ current_household.name }}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <ul class="dropdown-menu">
+            <li><h6 class="dropdown-header">Switch household</h6></li>
+            {% for h in my_households %}
+            <li>
+                <form method="post" action="{% url 'switch_household' %}">{% csrf_token %}
+                    <input type="hidden" name="household" value="{{ h.pk }}">
+                    <button type="submit" class="dropdown-item d-flex align-items-center justify-content-between gap-3" {% if h.pk == current_household.pk %}aria-current="true"{% endif %}>
+                        {{ h.name }}
+                        {% if h.pk == current_household.pk %}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>{% endif %}
+                    </button>
+                </form>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
     {% if user.is_authenticated %}
     <nav class="app-nav d-none d-lg-flex" aria-label="Main">
         <a href="/" {% if nav_section == 'week' %}aria-current="page"{% endif %}>This week</a>

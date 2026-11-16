@@ -61,8 +61,12 @@ King Soopers cart through the Kroger API.
    public hostname.
 5. **First run** — run `docker exec -it meal_planner python manage.py createsuperuser`. Then in
    `/admin/`:
-   - Add every household member under *Allowed users*.
-   - Fill in *Household settings*: servings, breakfast/lunch/dinner event times and lengths,
+   - Add everyone who may sign in under *Allowed users*, and group them under *Households*
+     (each membership chooses whether that person gets the household's weekly email). Each
+     household has its own plans, recipes, preferences, store, calendar and King Soopers
+     account; someone in several switches between them from the menu beside the logo. An
+     allowed user who isn't in any household gets one of their own on first sign-in.
+   - Fill in each household's *Household settings*: servings, breakfast/lunch/dinner event times and lengths,
      and pantry staples. Which meals to plan is set on the Preferences page.
    - To find the store ID, run `docker exec meal_planner python manage.py kroger_locations <zip>`.
 6. **Connect King Soopers** — open Groceries → *Connect your account* and sign in with the
@@ -71,7 +75,7 @@ King Soopers cart through the Kroger API.
 ## Manual runs
 
 ```bash
-docker exec meal_planner python manage.py generate_meal_plan [--week-start 2026-11-01] [--regenerate] [--email]
+docker exec meal_planner python manage.py generate_meal_plan [--household ID] [--week-start 2026-11-01] [--regenerate] [--email]
 ```
 
 ## Tests

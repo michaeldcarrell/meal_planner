@@ -385,6 +385,36 @@ body {
     background: var(--mp-accent-soft);
 }
 
+/* Household switcher, beside the brand; only shown to people in more than one household. */
+.household-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 38vw;
+    padding: 4px 8px;
+    border: 1px solid var(--mp-line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--mp-muted);
+    font-family: var(--mp-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.household-button:hover,
+.household-button[aria-expanded="true"] {
+    color: var(--mp-ink);
+    border-color: var(--mp-dim);
+}
+
+.household-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .app-header-actions {
     margin-left: auto;
     display: flex;
